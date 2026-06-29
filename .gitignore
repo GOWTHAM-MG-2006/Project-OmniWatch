@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+*.env.local
+
+# Node
+node_modules/
+dist/
+.next/
+
+# Docker
+*.log
+
+# VS Code
+.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+*.csv
+*.parquet
+data/
+
+#Project_Details
+Project_Source_Files/
+Agents.md
