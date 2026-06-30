@@ -1,0 +1,137 @@
+# ============================================================================
+# OmniWatch — OpenTelemetry Collector Configuration
+# Component: otelcol-config.yaml
+# Phase: 2
+# Purpose: Receives telemetry from simulators and routes to storage backends
+# Receives: OTLP gRPC/HTTP, Prometheus scrape, Loki push
+# Exports: ClickHouse (metrics/logs), Jaeger (traces), Loki (logs)
+# ============================================================================
+
+receivers:
+  # OTLP receiver — accepts gRPC and HTTP traces/metrics/logs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver — scrapes Prometheus endpoints
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: omniwatch-simulation
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["host.docker.internal:8000"]
+
+  # Loki receiver — receives logs via HTTP push (Loki push API)
+  # Note: Loki receiver is experimental; we use OTLP for logs instead
+
+processors:
+  # Batch processor — batches telemetry before export
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter — prevents OOM by limiting memory usage
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource detection — adds host metadata to telemetry
+  resourcedetection:
+    detectors: ["env", "system"]
+    timeout: 5s
+
+  # Resource — adds OmniWatch-specific labels
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "simulation"
+        action: upsert
+      - key: service.namespace
+        value: "omniwatch"
+        action: upsert
+
+exporters:
+  # ClickHouse exporter — stores metrics and logs
+  clickhouse:
+    endpoint: "clickhouse://localhost:9000"
+    database: "omniwatch"
+    resource_to_telemetry_conversion:
+      enabled: true
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Jaeger exporter — stores traces
+  jaeger:
+    endpoint: "localhost:14250"
+    tls:
+      insecure: true
+
+  # OTLP exporter for traces to Jaeger (via OTLP receiver)
+  otlp/jaeger:
+    endpoint: "localhost:4317"
+    tls:
+      insecure: true
+
+  # Loki exporter — stores logs
+  loki:
+    endpoint: "http://localhost:3100/loki/api/v1/push"
+    labels:
+      job: "omniwatch-otelcol"
+
+  # Kafka exporter — publishes metrics to Kafka topics
+  kafka:
+    brokers: ["localhost:9092"]
+    topic: "omniwatch.metrics.raw"
+    encoding: "json"
+
+  # Kafka exporter for logs
+  kafka/logs:
+    brokers: ["localhost:9092"]
+    topic: "omniwatch.logs.raw"
+    encoding: "json"
+
+  # Debug exporter — logs telemetry to stdout (for debugging)
+  debug:
+    verbosity: basic
+
+  # Prometheus exporter — exposes metrics for Prometheus scraping
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "omniwatch"
+
+service:
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888
+
+  pipelines:
+    # Metrics pipeline: receive → process → export
+    metrics:
+      receivers: ["otlp", "prometheus"]
+      processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
+      exporters: ["clickhouse", "kafka", "prometheus"]
+
+    # Traces pipeline: receive → process → export
+    traces:
+      receivers: ["otlp"]
+      processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
+      exporters: ["otlp/jaeger"]
+
+    # Logs pipeline: receive → process → export
+    logs:
+      receivers: ["otlp"]
+      processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
+      exporters: ["clickhouse", "kafka/logs", "loki"]
