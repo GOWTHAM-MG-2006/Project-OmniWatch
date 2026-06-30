@@ -52,7 +52,7 @@ app.add_middleware(
 )
 
 # Include routes from routes.py
-app.include_router(routes_router, prefix="/routes", title="Utility Routes")
+app.include_router(routes_router, prefix="/routes")
 
 # Global producer instance
 producer = KafkaProducer(KAFKA_BOOTSTRAP_SERVERS)
