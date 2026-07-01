@@ -107,10 +107,17 @@ class ClickHouseClient:
             return False
 
         try:
+            from datetime import datetime as dt
             rows = []
             for m in metrics:
+                ts = m.get("timestamp", "")
+                if isinstance(ts, str):
+                    try:
+                        ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        ts = dt.now(timezone.utc)
                 rows.append((
-                    m.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                    ts,
                     m.get("entity_id", "unknown"),
                     m.get("entity_type", "UNKNOWN_NODE"),
                     m.get("metric_name", "unknown"),
@@ -140,10 +147,17 @@ class ClickHouseClient:
             return False
 
         try:
+            from datetime import datetime as dt
             rows = []
             for l in logs:
+                ts = l.get("timestamp", "")
+                if isinstance(ts, str):
+                    try:
+                        ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        ts = dt.now(timezone.utc)
                 rows.append((
-                    l.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                    ts,
                     l.get("entity_id", "unknown"),
                     l.get("entity_type", "UNKNOWN_NODE"),
                     l.get("log_level", "info"),

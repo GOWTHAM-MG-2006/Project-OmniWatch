@@ -17,9 +17,9 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "storage"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "storage" / "clickhouse"))
 
-from clickhouse.client import ClickHouseClient
+from client import ClickHouseClient
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 

@@ -17,11 +17,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Add paths for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingestion"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "storage" / "clickhouse"))
 
 from kafka_bus import KafkaConsumer
-from storage.clickhouse.client import ClickHouseClient
+from client import ClickHouseClient
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
