@@ -26,8 +26,7 @@ CREATE TABLE IF NOT EXISTS omniwatch.metrics
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (entity_id, metric_name, timestamp)
-TTL timestamp + INTERVAL 90 DAY;
+ORDER BY (entity_id, metric_name, timestamp);
 
 -- ============================================================================
 -- Table: logs
@@ -46,8 +45,7 @@ CREATE TABLE IF NOT EXISTS omniwatch.logs
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (entity_id, log_level, timestamp)
-TTL timestamp + INTERVAL 90 DAY;
+ORDER BY (entity_id, log_level, timestamp);
 
 -- ============================================================================
 -- Table: anomalies
@@ -67,8 +65,7 @@ CREATE TABLE IF NOT EXISTS omniwatch.anomalies
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (status, entity_id, timestamp)
-TTL timestamp + INTERVAL 180 DAY;
+ORDER BY (status, entity_id, timestamp);
 
 -- ============================================================================
 -- Table: incidents
@@ -88,8 +85,7 @@ CREATE TABLE IF NOT EXISTS omniwatch.incidents
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(created_at)
-ORDER BY (severity, status, created_at)
-TTL created_at + INTERVAL 365 DAY;
+ORDER BY (severity, status, created_at);
 
 -- ============================================================================
 -- Table: pending_approvals
