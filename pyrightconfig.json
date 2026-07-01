@@ -1,5 +1,13 @@
 {
     "venvPath": "${workspaceFolder}/simulation/.venv",
     "venv": "${workspaceFolder}/simulation/.venv",
-    "pythonVersion": "3.14"
+    "pythonVersion": "3.14",
+    "extraPaths": [
+        "${workspaceFolder}/ingestion",
+        "${workspaceFolder}/storage/clickhouse",
+        "${workspaceFolder}/storage/neo4j",
+        "${workspaceFolder}/storage/minio",
+        "${workspaceFolder}/abstraction"
+    ],
+    "reportMissingImports": false
 }
