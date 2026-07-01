@@ -2,9 +2,10 @@
 OmniWatch — Simulation Layer
 Component: Normal Telemetry Generator
 Phase: 1
-Purpose: Continuously generates realistic Prometheus metrics and pushes structured logs to Loki for all simulated services
+Purpose: Continuously generates realistic Prometheus metrics, pushes logs to Loki,
+         and publishes to Kafka for end-to-end pipeline testing
 Inputs: topology.json (service definitions), anomaly_state.json (optional anomaly overrides)
-Outputs: Prometheus metrics on :8000/metrics, JSON logs to Loki via HTTP POST
+Outputs: Prometheus metrics on :8000/metrics, JSON logs to Loki, events to Kafka topics
 """
 
 import json
@@ -20,16 +21,34 @@ import requests
 from dotenv import load_dotenv
 from prometheus_client import Counter, Gauge, start_http_server
 
+# Kafka producer (optional — graceful fallback if not available)
+try:
+    from confluent_kafka import Producer as KafkaProducer
+    KAFKA_AVAILABLE = True
+except ImportError:
+    KAFKA_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Section 3: Load environment variables
 # ---------------------------------------------------------------------------
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 LOKI_URL = os.getenv("LOKI_URL", "http://localhost:3100")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 PROMETHEUS_PORT = 8000
 ANOMALY_STATE_PATH = Path(__file__).resolve().parent / "anomaly_state.json"
 TOPOLOGY_PATH = Path(__file__).resolve().parent / "topology.json"
 CYCLE_INTERVAL = 5  # seconds
+
+# Initialize Kafka producer
+_kafka_producer = None
+if KAFKA_AVAILABLE:
+    try:
+        _kafka_producer = KafkaProducer({"bootstrap.servers": KAFKA_BOOTSTRAP})
+        print(f"[normal_telemetry] Kafka connected: {KAFKA_BOOTSTRAP}")
+    except Exception as e:
+        print(f"[normal_telemetry] WARNING: Kafka not available: {e}")
+        _kafka_producer = None
 
 # ---------------------------------------------------------------------------
 # Section 4: Service registry — load topology.json
@@ -175,7 +194,36 @@ class ServiceState:
 service_states = {sid: ServiceState(sid) for sid in SERVICE_LIST}
 
 # ---------------------------------------------------------------------------
-# Section 7: Loki push function
+# Section 7a: Kafka publish functions
+# ---------------------------------------------------------------------------
+def publish_to_kafka(topic: str, message: dict, key: str = None):
+    """Publish a JSON message to a Kafka topic."""
+    if not _kafka_producer:
+        return
+    try:
+        import json as _json
+        value = _json.dumps(message, default=str).encode("utf-8")
+        key_bytes = key.encode("utf-8") if key else None
+        _kafka_producer.produce(topic, key=key_bytes, value=value)
+        _kafka_producer.poll(0)
+    except Exception:
+        pass  # Silent fail — don't slow down telemetry generation
+
+
+def publish_metrics_to_kafka(metrics_list: list):
+    """Publish metrics to omniwatch.metrics.raw topic."""
+    for m in metrics_list:
+        publish_to_kafka("omniwatch.metrics.raw", m, key=m.get("entity_id"))
+
+
+def publish_logs_to_kafka(logs_list: list):
+    """Publish logs to omniwatch.logs.raw topic."""
+    for l in logs_list:
+        publish_to_kafka("omniwatch.logs.raw", l, key=l.get("entity_id"))
+
+
+# ---------------------------------------------------------------------------
+# Section 7b: Loki push function
 # ---------------------------------------------------------------------------
 _session = requests.Session()
 
@@ -384,7 +432,8 @@ def read_anomaly_state() -> dict:
 
 def main():
     start_http_server(PROMETHEUS_PORT)
-    print(f"[normal_telemetry] Started — exposing metrics on :{PROMETHEUS_PORT}, pushing logs to Loki")
+    kafka_status = "Kafka connected" if _kafka_producer else "Kafka unavailable"
+    print(f"[normal_telemetry] Started — metrics on :{PROMETHEUS_PORT}, logs to Loki, {kafka_status}")
 
     cycle_count = 0
     while True:
@@ -395,9 +444,43 @@ def main():
             logs = generate_logs(overrides)
             push_logs_to_loki(logs)
 
+            # Publish to Kafka for end-to-end pipeline
+            if _kafka_producer:
+                # Build metric messages for Kafka
+                ts = datetime.now(timezone.utc).isoformat()
+                for sid in SERVICE_LIST:
+                    meta = SERVICE_META[sid]
+                    state = service_states[sid]
+                    metric_msg = {
+                        "entity_id": sid,
+                        "entity_type": meta.get("type", "UNKNOWN"),
+                        "metric_name": "cpu_usage_percent",
+                        "metric_value": round(state.cpu, 1),
+                        "cloud_provider": meta.get("cloud_provider", "simulated-aws"),
+                        "timestamp": ts,
+                        "source": "simulation",
+                    }
+                    publish_to_kafka("omniwatch.metrics.raw", metric_msg, key=sid)
+
+                # Build log messages for Kafka
+                for log_entry in logs:
+                    log_msg = {
+                        "entity_id": log_entry["service"],
+                        "entity_type": log_entry["node_type"],
+                        "log_level": log_entry["level"],
+                        "message": log_entry["message"],
+                        "cloud_provider": log_entry["cloud_provider"],
+                        "timestamp": ts,
+                        "source": "simulation",
+                    }
+                    publish_to_kafka("omniwatch.logs.raw", log_msg, key=log_entry["service"])
+
+                _kafka_producer.flush(timeout=1)
+
             if cycle_count % 6 == 0:
-                ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                print(f"[normal_telemetry] Cycle {cycle_count} — {ts} — metrics updated for {len(SERVICE_LIST)} services — logs pushed to Loki")
+                ts_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                kafka_info = " + Kafka" if _kafka_producer else ""
+                print(f"[normal_telemetry] Cycle {cycle_count} — {ts_str} — metrics for {len(SERVICE_LIST)} services — Loki{kafka_info}")
 
             time.sleep(CYCLE_INTERVAL)
         except KeyboardInterrupt:
