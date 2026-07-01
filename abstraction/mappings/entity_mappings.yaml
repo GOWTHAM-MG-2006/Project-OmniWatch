@@ -1,0 +1,107 @@
+# ============================================================================
+# OmniWatch — Entity Mappings Configuration
+# Component: entity_mappings.yaml
+# Phase: 3
+# Purpose: Configurable mapping of cloud-specific names to unified entity types
+# ============================================================================
+
+# Service name → Unified entity type mappings
+# Add new mappings here as cloud providers are added
+
+service_mappings:
+  # Simulated services (Phase 1)
+  api-gateway:
+    entity_type: API_NODE
+    cloud_provider: simulated-aws
+    criticality: critical
+    sla_tier: gold
+
+  auth-service:
+    entity_type: AUTH_NODE
+    cloud_provider: simulated-azure
+    criticality: critical
+    sla_tier: gold
+
+  product-service:
+    entity_type: API_NODE
+    cloud_provider: simulated-aws
+    criticality: high
+    sla_tier: silver
+
+  inventory-service:
+    entity_type: API_NODE
+    cloud_provider: simulated-aws
+    criticality: high
+    sla_tier: silver
+
+  load-balancer:
+    entity_type: LOADBALANCER_NODE
+    cloud_provider: simulated-aws
+    criticality: critical
+    sla_tier: gold
+
+  background-worker:
+    entity_type: WORKER_NODE
+    cloud_provider: simulated-gcp
+    criticality: medium
+    sla_tier: bronze
+
+  postgresql-database:
+    entity_type: DATABASE_NODE
+    cloud_provider: simulated-aws
+    criticality: critical
+    sla_tier: gold
+
+  redis-cache:
+    entity_type: CACHE_NODE
+    cloud_provider: simulated-aws
+    criticality: high
+    sla_tier: silver
+
+  user-database:
+    entity_type: DATABASE_NODE
+    cloud_provider: simulated-azure
+    criticality: critical
+    sla_tier: gold
+
+  minio-storage:
+    entity_type: STORAGE_NODE
+    cloud_provider: simulated-gcp
+    criticality: medium
+    sla_tier: bronze
+
+# Real cloud provider mappings (for future use)
+cloud_mappings:
+  aws:
+    ec2: COMPUTE_NODE
+    rds: DATABASE_NODE
+    elbv2: LOADBALANCER_NODE
+    elasticache: CACHE_NODE
+    eks: CONTAINER_NODE
+    s3: STORAGE_NODE
+    lambda: FUNCTION_NODE
+
+  azure:
+    virtual_machine: COMPUTE_NODE
+    azure_sql: DATABASE_NODE
+    azure_load_balancer: LOADBALANCER_NODE
+    azure_cache: CACHE_NODE
+    aks: CONTAINER_NODE
+    blob_storage: STORAGE_NODE
+    azure_functions: FUNCTION_NODE
+
+  gcp:
+    compute_engine: COMPUTE_NODE
+    cloud_sql: DATABASE_NODE
+    cloud_load_balancer: LOADBALANCER_NODE
+    cloud_memorystore: CACHE_NODE
+    gke: CONTAINER_NODE
+    cloud_storage: STORAGE_NODE
+    cloud_functions: FUNCTION_NODE
+
+# Default values for unknown entities
+defaults:
+  entity_type: UNKNOWN_NODE
+  cloud_provider: unknown
+  criticality: low
+  sla_tier: bronze
