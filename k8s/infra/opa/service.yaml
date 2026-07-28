@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  ports:
+    - port: 8181
+      targetPort: 8181
+      name: http
+  selector:
+    app.kubernetes.io/name: opa

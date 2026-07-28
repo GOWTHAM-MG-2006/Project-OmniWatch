@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opa
+    spec:
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:latest-static
+          args:
+            - run
+            - --server
+            - --log-level=info
+            - --addr=0.0.0.0:8181
+          ports:
+            - containerPort: 8181
+              name: http
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10

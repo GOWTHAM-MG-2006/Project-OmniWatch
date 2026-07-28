@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: zookeeper
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  ports:
+    - port: 2181
+      targetPort: 2181
+      name: client
+  selector:
+    app.kubernetes.io/name: zookeeper

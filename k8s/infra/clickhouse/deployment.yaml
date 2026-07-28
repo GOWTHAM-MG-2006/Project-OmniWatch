@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clickhouse
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:23.8
+          ports:
+            - containerPort: 9000
+              name: native
+            - containerPort: 8123
+              name: http
+          env:
+            - name: CLICKHOUSE_DB
+              value: omniwatch
+            - name: CLICKHOUSE_USER
+              value: default
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: clickhouse-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-pvc
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard

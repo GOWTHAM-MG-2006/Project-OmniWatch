@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  ports:
+    - port: 9092
+      targetPort: 9092
+      name: plaintext
+  selector:
+    app.kubernetes.io/name: kafka

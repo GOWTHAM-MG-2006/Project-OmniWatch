@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: neo4j
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: neo4j
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: neo4j
+    spec:
+      containers:
+        - name: neo4j
+          image: neo4j:5.13-community
+          ports:
+            - containerPort: 7474
+              name: http
+            - containerPort: 7687
+              name: bolt
+          env:
+            - name: NEO4J_AUTH
+              value: neo4j/omniwatch
+            - name: NEO4J_PLUGINS
+              value: '["apoc"]'
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: neo4j-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-pvc
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: neo4j
+    app.kubernetes.io/part-of: omniwatch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
