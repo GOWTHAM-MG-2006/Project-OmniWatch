@@ -8,6 +8,7 @@ env/
 dist/
 build/
 *.egg
+.pytest_cache/
 
 # Environment
 .env
@@ -20,6 +21,12 @@ dist/
 
 # Docker
 *.log
+
+# Terraform
+.terraform/
+
+# Code Graph
+.codegraph/
 
 # VS Code
 .vscode/
