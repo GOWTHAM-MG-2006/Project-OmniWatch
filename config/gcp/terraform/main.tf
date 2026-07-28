@@ -62,12 +62,8 @@ resource "google_compute_firewall" "allow_internal_ingress" {
       "7687",  # Neo4j Bolt
       "9001",  # MinIO Console
       "9010",  # Reserved / auxiliary
-      "3100",  # Loki
-      "16686", # Jaeger UI
-      "6379",  # Redis
       "8181",  # OPA
       "11434", # Ollama
-      "9090",  # Prometheus
     ]
   }
 

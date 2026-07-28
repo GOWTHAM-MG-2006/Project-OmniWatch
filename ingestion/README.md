@@ -8,8 +8,8 @@ Build the official data collection pipeline that reads from simulators
 
 ### 1. otelcol-config.yaml
 OpenTelemetry Collector configuration file.
-- Receives: OTLP gRPC/HTTP, Prometheus scrape
-- Exports: ClickHouse (metrics/logs), Jaeger (traces), Loki (logs)
+- Receives: OTLP gRPC/HTTP
+- Exports: ClickHouse (metrics/logs/traces)
 - Processors: batch, memory_limiter, resource detection
 
 ### 2. kafka_bus.py

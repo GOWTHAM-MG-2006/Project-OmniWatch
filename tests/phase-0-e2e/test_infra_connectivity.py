@@ -28,7 +28,7 @@ K8S_INFRA_DIR = PROJECT_ROOT / "k8s" / "infra"
 
 REQUIRED_SERVICES = [
     "zookeeper", "kafka", "clickhouse", "neo4j", "minio",
-    "prometheus", "loki", "jaeger", "ollama", "redis", "opa",
+    "ollama", "opa",
 ]
 
 SERVICE_PORTS = {
@@ -36,11 +36,7 @@ SERVICE_PORTS = {
     "clickhouse":  {"api": 8123,  "type": "http"},
     "neo4j":       {"api": 7474,  "type": "http"},
     "minio":       {"api": 9001,  "type": "http"},
-    "prometheus":  {"api": 9090,  "type": "http"},
-    "loki":        {"api": 3100,  "type": "http"},
-    "jaeger":      {"api": 16686, "type": "http"},
     "ollama":      {"api": 11434, "type": "http"},
-    "redis":       {"api": 6379,  "type": "tcp"},
     "opa":         {"api": 8181,  "type": "http"},
 }
 
@@ -51,9 +47,6 @@ SERVICE_HEALTH_ENDPOINTS = {
     "clickhouse":  f"{BASE_URL}:8123/ping",
     "neo4j":       f"{BASE_URL}:7474",
     "minio":       f"{BASE_URL}:9001/minio/health/live",
-    "prometheus":  f"{BASE_URL}:9090/-/healthy",
-    "loki":        f"{BASE_URL}:3100/ready",
-    "jaeger":      f"{BASE_URL}:16686",
     "ollama":      f"{BASE_URL}:11434/api/tags",
     "opa":         f"{BASE_URL}:8181/health",
 }
@@ -105,16 +98,12 @@ class TestPhase0Structure:
         # Verify key env vars
         required_vars = [
             "KAFKA_HOST", "CLICKHOUSE_HOST", "NEO4J_HOST",
-            "MINIO_HOST", "PROMETHEUS_HOST", "REDIS_HOST",
+            "MINIO_HOST",
         ]
         for var in required_vars:
             assert var in content, f"Required env var {var} missing from .env.example"
 
-    def test_prometheus_config_exists(self):
-        prom_file = PROJECT_ROOT / "config" / "prometheus.yml"
-        assert prom_file.exists(), "config/prometheus.yml missing"
-        content = prom_file.read_text()
-        assert "otel-collector" in content, "prometheus.yml missing otel-collector job"
+    
 
     def test_terraform_dir_exists(self):
         assert TERRAFORM_DIR.exists(), "config/gcp/terraform/ missing"
@@ -199,18 +188,7 @@ class TestDockerComposeConnectivity:
         except Exception as e:
             pytest.fail(f"ClickHouse connection failed: {e}")
 
-    def test_redis_ping(self):
-        """Validate Redis responds to PING."""
-        try:
-            import redis as redis_client
-            r = redis_client.Redis(host=DOCKER_HOST, port=6379, socket_timeout=5)
-            pong = r.ping()
-            assert pong is True, "Redis PING failed"
-            r.close()
-        except ImportError:
-            pytest.skip("redis-py not installed")
-        except Exception as e:
-            pytest.fail(f"Redis connection failed: {e}")
+    
 
     def test_minio_bucket_list(self):
         """Validate MinIO lists buckets."""
@@ -338,7 +316,6 @@ if __name__ == "__main__":
     checks = [
         ("docker-compose.yml", DOCKER_COMPOSE_FILE.exists()),
         (".env.example", (PROJECT_ROOT / ".env.example").exists()),
-        ("config/prometheus.yml", (PROJECT_ROOT / "config" / "prometheus.yml").exists()),
         ("config/gcp/terraform/", TERRAFORM_DIR.exists()),
         ("config/k8s/namespace.yaml", K8S_NAMESPACE_FILE.exists()),
         ("k8s/infra/", K8S_INFRA_DIR.exists()),

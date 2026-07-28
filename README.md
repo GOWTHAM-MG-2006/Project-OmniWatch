@@ -15,7 +15,7 @@ Proactive anomaly detection, causal root cause analysis, automated remediation, 
 | 1 | Microservices + OTel | Real services with OpenTelemetry SDKs |
 | 2 | Telemetry Ingestion | OTel Collector → Kafka → Flink streaming |
 | 3 | Entity Resolution | Cross-cloud ID normalization |
-| 4 | Windowing + Feature Store | Windowed aggregation, Redis feature store |
+| 4 | Windowing + Feature Store | Windowed aggregation for ML features |
 | 5 | Unified Storage | ClickHouse (metrics), Neo4j (graph), MinIO (objects) |
 | 6 | Predictive Intelligence | Merlion anomaly detection + Security classifier |
 | 7 | Causal Graph Engine | PyRCA + DAG traversal root cause analysis |
@@ -46,8 +46,7 @@ cd E:\Telementry-Simulation\opentelemetry-demo
 # 4. Verify services
 #    Neo4j:   http://localhost:7474  (neo4j/omniwatch)
 #    Kafka:   localhost:9092
-#    Jaeger:  http://localhost:16686
-#    Prometheus: http://localhost:9090
+#    ClickHouse: localhost:9000
 ```
 
 ---

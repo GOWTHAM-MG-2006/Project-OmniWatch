@@ -9,9 +9,7 @@ volumes:
   neo4j-data:
   neo4j-logs:
   minio-data:
-  prometheus-data:
-  loki-data:
-  redis-data:
+  
   ollama-data:
 
 services:
@@ -124,61 +122,6 @@ services:
       retries: 10
       start_period: 30s
 
-  prometheus:
-    image: prom/prometheus:v2.47.0
-    container_name: omniwatch-prometheus
-    networks:
-      - omniwatch-network
-    ports:
-      - "9090:9090"
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=15d"
-    volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  loki:
-    image: grafana/loki:2.9.0
-    container_name: omniwatch-loki
-    networks:
-      - omniwatch-network
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - loki-data:/loki
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.50
-    container_name: omniwatch-jaeger
-    networks:
-      - omniwatch-network
-    ports:
-      - "16686:16686"
-      - "14268:14268"
-      - "6831:6831/udp"
-      - "4317:4317"
-      - "4318:4318"
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   ollama:
     image: ollama/ollama:latest
     container_name: omniwatch-ollama
@@ -194,19 +137,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-
-  redis:
-    image: redis:7.2-alpine
-    container_name: omniwatch-redis
-    networks:
-      - omniwatch-network
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   opa:
     image: openpolicyagent/opa:latest-static
