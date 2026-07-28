@@ -22,7 +22,7 @@ dist/
 *.log
 
 # VS Code
-.vscode/settings.json
+.vscode/
 
 # OS
 .DS_Store
@@ -37,3 +37,5 @@ data/
 Project_Source_Files/
 Agents.md
 .mimocode/
+.opencode/
+.omo/
