@@ -157,10 +157,10 @@ class TestDockerComposeConnectivity:
         """Validate Kafka can create and list topics."""
         try:
             from kafka.admin import KafkaAdminClient, NewTopic
-            from kafka.errors import NoBrokersAvailable
+            from kafka.errors import BrokerNotAvailableError
 
             admin = KafkaAdminClient(
-                bootstrap_services=f"{DOCKER_HOST}:9092",
+                bootstrap_servers=f"{DOCKER_HOST}:9092",
                 client_id="omniwatch-phase0-test",
                 request_timeout_ms=5000,
             )
@@ -172,7 +172,7 @@ class TestDockerComposeConnectivity:
             assert test_topic in topics, f"Kafka topic {test_topic} not created"
         except ImportError:
             pytest.skip("kafka-python not installed")
-        except NoBrokersAvailable:
+        except BrokerNotAvailableError:
             pytest.fail("Kafka broker not reachable at localhost:9092")
 
     def test_clickhouse_query(self):
@@ -225,21 +225,35 @@ class TestTerraformConfig:
 
     def test_terraform_validate(self):
         """Run `terraform fmt -check` and `terraform validate`."""
+        import shutil
+        tf = shutil.which("terraform")
+        if not tf:
+            # Check common winget install location
+            winget_path = (
+                Path(os.environ["LOCALAPPDATA"])
+                / "Microsoft" / "WinGet" / "Packages"
+                / "Hashicorp.Terraform_Microsoft.Winget.Source_8wekyb3d8bbwe"
+                / "terraform.exe"
+            )
+            if winget_path.exists():
+                tf = str(winget_path)
+        if not tf:
+            pytest.skip("terraform CLI not found")
         try:
             fmt_result = subprocess.run(
-                ["terraform", "fmt", "-check", "-recursive"],
+                [tf, "fmt", "-check", "-recursive"],
                 capture_output=True, text=True, timeout=30,
                 cwd=TERRAFORM_DIR,
             )
             init_result = subprocess.run(
-                ["terraform", "init", "-backend=false"],
+                [tf, "init", "-backend=false"],
                 capture_output=True, text=True, timeout=60,
                 cwd=TERRAFORM_DIR,
             )
             assert init_result.returncode == 0, \
                 f"terraform init failed:\n{init_result.stderr}"
             validate_result = subprocess.run(
-                ["terraform", "validate"],
+                [tf, "validate"],
                 capture_output=True, text=True, timeout=60,
                 cwd=TERRAFORM_DIR,
             )
