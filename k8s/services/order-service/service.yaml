@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: omniwatch
+  labels:
+    app: order-service
+    tier: backend
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8002
+      targetPort: 8002
+      name: http
+  selector:
+    app: order-service

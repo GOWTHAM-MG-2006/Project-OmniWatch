@@ -1,0 +1,57 @@
+{
+  "resource": {
+    "attributes": [
+      {"key": "service.name", "value": {"stringValue": "user-service"}},
+      {"key": "service.namespace", "value": {"stringValue": "omniwatch"}},
+      {"key": "deployment.environment", "value": {"stringValue": "simulation"}}
+    ]
+  },
+  "scopeMetrics": [
+    {
+      "scope": {"name": "omniwatch.meters", "version": "1.0.0"},
+      "metrics": [
+        {
+          "name": "http.requests.total",
+          "unit": "count",
+          "gauge": {
+            "dataPoints": [
+              {
+                "attributes": [{"key": "method", "value": {"stringValue": "GET"}}],
+                "timeUnixNano": "1785307829000000000",
+                "asDouble": 42.0
+              }
+            ]
+          }
+        },
+        {
+          "name": "http.request.duration",
+          "unit": "ms",
+          "sum": {
+            "dataPoints": [
+              {
+                "attributes": [{"key": "method", "value": {"stringValue": "POST"}}],
+                "timeUnixNano": "1785307829000000000",
+                "asDouble": 125.5
+              }
+            ]
+          }
+        },
+        {
+          "name": "db.query.duration",
+          "unit": "ms",
+          "histogram": {
+            "dataPoints": [
+              {
+                "timeUnixNano": "1785307829000000000",
+                "count": 100,
+                "sum": 5000.0,
+                "explicitBounds": [10.0, 50.0, 100.0, 500.0],
+                "bucketCounts": [30, 40, 20, 8, 2]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

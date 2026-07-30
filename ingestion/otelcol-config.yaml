@@ -5,6 +5,7 @@
 # Purpose: Receives ALL telemetry via OTLP and routes to Kafka + ClickHouse
 # Receives: OTLP gRPC/HTTP (metrics, logs, traces)
 # Exports: Kafka (all raw telemetry for Flink processing), ClickHouse (all telemetry)
+# OTel Collector Version: v0.157.0+ (franz-go based Kafka client)
 # ============================================================================
 
 receivers:
@@ -49,8 +50,6 @@ exporters:
   clickhouse:
     endpoint: "tcp://clickhouse:9000"
     database: "omniwatch"
-    resource_to_telemetry_conversion:
-      enabled: true
     sending_queue:
       enabled: true
       num_consumers: 10
@@ -61,29 +60,28 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 300s
 
-  # Kafka exporter — publishes all raw telemetry to Kafka for Flink processing
+  # Kafka exporter — publishes all raw telemetry to signal-specific topics
+  # Uses signal-level topic configs (franz-go client, v0.157+)
   kafka:
-    brokers: ["kafka:9092"]
-    topic: "omniwatch.metrics.raw"
-    encoding: "json"
-
-  # Kafka exporter for traces
-  kafka/traces:
-    brokers: ["kafka:9092"]
-    topic: "omniwatch.traces.raw"
-    encoding: "json"
-
-  # Kafka exporter for logs
-  kafka/logs:
-    brokers: ["kafka:9092"]
-    topic: "omniwatch.logs.raw"
-    encoding: "json"
-
-  # Kafka exporter for security events
-  kafka/security:
-    brokers: ["kafka:9092"]
-    topic: "omniwatch.security.events"
-    encoding: "json"
+    brokers: ["kafka:29092"]
+    metrics:
+      topic: "omniwatch.metrics.raw"
+      encoding: "otlp_json"
+    traces:
+      topic: "omniwatch.traces.raw"
+      encoding: "otlp_json"
+    logs:
+      topic: "omniwatch.logs.raw"
+      encoding: "otlp_json"
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
 
   # Debug exporter — logs telemetry to stdout (for debugging)
   debug:
@@ -92,7 +90,12 @@ exporters:
 service:
   telemetry:
     metrics:
-      address: 0.0.0.0:8888
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: "0.0.0.0"
+                port: 8888
 
   pipelines:
     # Metrics pipeline: OTLP → ClickHouse + Kafka
@@ -105,16 +108,10 @@ service:
     traces:
       receivers: ["otlp"]
       processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["kafka/traces", "clickhouse", "debug"]
+      exporters: ["kafka", "clickhouse", "debug"]
 
     # Logs pipeline: OTLP → Kafka + ClickHouse
     logs:
       receivers: ["otlp"]
       processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["kafka/logs", "clickhouse", "debug"]
-
-    # Security events pipeline: OTLP → Kafka
-    security:
-      receivers: ["otlp"]
-      processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["kafka/security", "debug"]
+      exporters: ["kafka", "clickhouse", "debug"]

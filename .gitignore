@@ -35,6 +35,11 @@ dist/
 .DS_Store
 Thumbs.db
 
+# GitNexus / AI Agent config
+.gitnexus/
+.claude/
+CLAUDE.md
+
 # Data
 *.csv
 *.parquet

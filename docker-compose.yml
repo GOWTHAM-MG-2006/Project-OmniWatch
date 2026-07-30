@@ -9,8 +9,8 @@ volumes:
   neo4j-data:
   neo4j-logs:
   minio-data:
-  
   ollama-data:
+  flink-jobmanager-data:
 
 services:
 
@@ -156,6 +156,155 @@ services:
     healthcheck:
       test: ["CMD", "/opa", "version"]
       interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: omniwatch-otelcol
+    networks:
+      - omniwatch-network
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+    volumes:
+      - ./ingestion/otelcol-config.yaml:/etc/otelcol-contrib/config.yaml
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+
+  # ---------------------------------------------------------------------------
+  # Flink — Stream processing engine (Phase 2)
+  # ---------------------------------------------------------------------------
+  flink-jobmanager:
+    image: flink:1.17-scala_2.12
+    container_name: omniwatch-flink-jobmanager
+    networks:
+      - omniwatch-network
+    ports:
+      - "8081:8081"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+    command: jobmanager
+    volumes:
+      - flink-jobmanager-data:/opt/flink/log
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  flink-taskmanager:
+    image: flink:1.17-scala_2.12
+    container_name: omniwatch-flink-taskmanager
+    networks:
+      - omniwatch-network
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      TASK_MANAGER_NUMBER_OF_TASK_SLOTS: 4
+    command: taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # Stream Processor — Python OTel normalizer (Phase 2)
+  # ---------------------------------------------------------------------------
+  stream-processor:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    container_name: omniwatch-stream-processor
+    networks:
+      - omniwatch-network
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    command: ["run", "--poll-timeout", "5.0", "--batch-size", "50", "--verbose"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
+    container_name: omniwatch-api-gateway
+    networks:
+      - omniwatch-network
+    ports:
+      - "8000:8000"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4317
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otelcol:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user_service/Dockerfile
+    container_name: omniwatch-user-service
+    networks:
+      - omniwatch-network
+    ports:
+      - "8001:8001"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4317
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otelcol:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order_service/Dockerfile
+    container_name: omniwatch-order-service
+    networks:
+      - omniwatch-network
+    ports:
+      - "8002:8002"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4317
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otelcol:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8002/health"]
+      interval: 15s
       timeout: 5s
       retries: 5
       start_period: 15s
