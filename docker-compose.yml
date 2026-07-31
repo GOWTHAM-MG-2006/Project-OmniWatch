@@ -342,3 +342,58 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Feature Store — Phase 4 Flink job (windowed feature computation)
+  # ---------------------------------------------------------------------------
+  feature-store-flink:
+    build:
+      context: ./feature-store/flink
+      dockerfile: Dockerfile
+    container_name: omniwatch-feature-store-flink
+    command: ["sleep", "infinity"]
+    networks:
+      - omniwatch-network
+    volumes:
+      - ./feature-store/flink/build/libs:/jobs
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      flink-jobmanager:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # Feature Store API — serves computed feature vectors (Phase 4)
+  # ---------------------------------------------------------------------------
+  feature-store-api:
+    build:
+      context: ./feature-store/api
+      dockerfile: Dockerfile
+    container_name: omniwatch-feature-store-api
+    networks:
+      - omniwatch-network
+    ports:
+      - "8005:8005"
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
