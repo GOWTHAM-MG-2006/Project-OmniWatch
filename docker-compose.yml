@@ -191,6 +191,7 @@ services:
     command: jobmanager
     volumes:
       - flink-jobmanager-data:/opt/flink/log
+      - ./ingestion/flink/build/libs:/jobs
     depends_on:
       kafka:
         condition: service_healthy
@@ -213,6 +214,8 @@ services:
     depends_on:
       flink-jobmanager:
         condition: service_started
+    volumes:
+      - ./ingestion/flink/build/libs:/jobs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
       interval: 30s
@@ -221,21 +224,24 @@ services:
       start_period: 120s
 
   # ---------------------------------------------------------------------------
-  # Stream Processor — Python OTel normalizer (Phase 2)
+  # MinIO Bucket Init — creates required buckets before Flink starts
   # ---------------------------------------------------------------------------
-  stream-processor:
-    build:
-      context: .
-      dockerfile: ingestion/Dockerfile
-    container_name: omniwatch-stream-processor
+  minio-bucket-init:
+    image: minio/mc:latest
+    container_name: omniwatch-minio-init
     networks:
       - omniwatch-network
-    environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-    command: ["run", "--poll-timeout", "5.0", "--batch-size", "50", "--verbose"]
+    entrypoint: ["sh", "-c"]
+    command: >
+      "sleep 5 &&
+       mc alias set omniwatch http://minio:9010 minioadmin minioadmin &&
+       mc mb omniwatch/omniwatch-telemetry-archive --ignore-existing &&
+       echo 'Bucket ready'"
     depends_on:
-      kafka:
+      minio:
         condition: service_healthy
+    restart: "no"
+    profiles: ["setup"]
 
   api-gateway:
     build:

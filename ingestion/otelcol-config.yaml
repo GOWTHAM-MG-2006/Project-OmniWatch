@@ -2,9 +2,9 @@
 # OmniWatch — OpenTelemetry Collector Configuration
 # Component: otelcol-config.yaml
 # Phase: 2
-# Purpose: Receives ALL telemetry via OTLP and routes to Kafka + ClickHouse
+# Purpose: Receives ALL telemetry via OTLP and routes to Kafka for Flink processing
 # Receives: OTLP gRPC/HTTP (metrics, logs, traces)
-# Exports: Kafka (all raw telemetry for Flink processing), ClickHouse (all telemetry)
+# Exports: Kafka (all raw telemetry for Flink normalization/enrichment)
 # OTel Collector Version: v0.157.0+ (franz-go based Kafka client)
 # ============================================================================
 
@@ -46,21 +46,8 @@ processors:
         action: upsert
 
 exporters:
-  # ClickHouse exporter — unified storage for ALL telemetry (metrics, logs, traces)
-  clickhouse:
-    endpoint: "tcp://clickhouse:9000"
-    database: "omniwatch"
-    sending_queue:
-      enabled: true
-      num_consumers: 10
-      queue_size: 5000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 300s
-
   # Kafka exporter — publishes all raw telemetry to signal-specific topics
+  # Phase 2 routes ONLY to Kafka; ClickHouse is downstream (Phase 5)
   # Uses signal-level topic configs (franz-go client, v0.157+)
   kafka:
     brokers: ["kafka:29092"]
@@ -98,20 +85,20 @@ service:
                 port: 8888
 
   pipelines:
-    # Metrics pipeline: OTLP → ClickHouse + Kafka
+    # Metrics pipeline: OTLP → Kafka only (Phase 2; Flink consumes from Kafka)
     metrics:
       receivers: ["otlp"]
       processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["clickhouse", "kafka", "debug"]
+      exporters: ["kafka", "debug"]
 
-    # Traces pipeline: OTLP → Kafka + ClickHouse
+    # Traces pipeline: OTLP → Kafka only
     traces:
       receivers: ["otlp"]
       processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["kafka", "clickhouse", "debug"]
+      exporters: ["kafka", "debug"]
 
-    # Logs pipeline: OTLP → Kafka + ClickHouse
+    # Logs pipeline: OTLP → Kafka only
     logs:
       receivers: ["otlp"]
       processors: ["memory_limiter", "resourcedetection", "resource", "batch"]
-      exporters: ["kafka", "clickhouse", "debug"]
+      exporters: ["kafka", "debug"]

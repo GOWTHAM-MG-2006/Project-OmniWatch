@@ -35,20 +35,41 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv(
     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
 )
 
-# All 7 OmniWatch topics with their configuration
+# All OmniWatch topics with their configuration
+# Raw topics (OTel Collector → Kafka → Flink)
 TOPIC_METRICS_RAW = "omniwatch.metrics.raw"
 TOPIC_LOGS_RAW = "omniwatch.logs.raw"
 TOPIC_TRACES_RAW = "omniwatch.traces.raw"
+TOPIC_EVENTS_RAW = "omniwatch.events.raw"
+TOPIC_SECURITY_RAW = "omniwatch.security.raw"
+# Legacy security events topic (kept for backward compat)
 TOPIC_SECURITY_EVENTS = "omniwatch.security.events"
+# Normalized topics (Flink → downstream layers)
+TOPIC_METRICS_NORMALIZED = "omniwatch.metrics.normalized"
+TOPIC_LOGS_NORMALIZED = "omniwatch.logs.normalized"
+TOPIC_TRACES_NORMALIZED = "omniwatch.traces.normalized"
+TOPIC_EVENTS_NORMALIZED = "omniwatch.events.normalized"
+TOPIC_SECURITY_NORMALIZED = "omniwatch.security.normalized"
+# Downstream topics (Phase 3+)
 TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
 TOPIC_INCIDENTS_CREATED = "omniwatch.incidents.created"
 TOPIC_REMEDIATION_ACTIONS = "omniwatch.remediation.actions"
 
 ALL_TOPICS: list[str] = [
+    # Raw
     TOPIC_METRICS_RAW,
     TOPIC_LOGS_RAW,
     TOPIC_TRACES_RAW,
+    TOPIC_EVENTS_RAW,
+    TOPIC_SECURITY_RAW,
     TOPIC_SECURITY_EVENTS,
+    # Normalized
+    TOPIC_METRICS_NORMALIZED,
+    TOPIC_LOGS_NORMALIZED,
+    TOPIC_TRACES_NORMALIZED,
+    TOPIC_EVENTS_NORMALIZED,
+    TOPIC_SECURITY_NORMALIZED,
+    # Downstream
     TOPIC_ANOMALIES_DETECTED,
     TOPIC_INCIDENTS_CREATED,
     TOPIC_REMEDIATION_ACTIONS,
@@ -65,30 +86,86 @@ class TopicSpec:
     replication_factor: int = 1
 
 TOPIC_SPECS: dict[str, TopicSpec] = {
+    # Raw topics (OTel Collector → Kafka → Flink)
     TOPIC_METRICS_RAW: TopicSpec(
         name=TOPIC_METRICS_RAW,
-        producer="ingestion",
-        consumer="entity-resolution",
+        producer="otel-collector",
+        consumer="flink-ingestion",
         description="Raw metric time-series data from OTel Collector",
+        partitions=3,
     ),
     TOPIC_LOGS_RAW: TopicSpec(
         name=TOPIC_LOGS_RAW,
-        producer="ingestion",
-        consumer="entity-resolution",
+        producer="otel-collector",
+        consumer="flink-ingestion",
         description="Raw log events from OTel Collector",
+        partitions=3,
     ),
     TOPIC_TRACES_RAW: TopicSpec(
         name=TOPIC_TRACES_RAW,
-        producer="ingestion",
-        consumer="entity-resolution",
+        producer="otel-collector",
+        consumer="flink-ingestion",
         description="Raw trace spans from OTel Collector",
+        partitions=3,
+    ),
+    TOPIC_EVENTS_RAW: TopicSpec(
+        name=TOPIC_EVENTS_RAW,
+        producer="otel-collector",
+        consumer="flink-ingestion",
+        description="Raw event data from OTel Collector",
+        partitions=2,
+    ),
+    TOPIC_SECURITY_RAW: TopicSpec(
+        name=TOPIC_SECURITY_RAW,
+        producer="otel-collector",
+        consumer="flink-ingestion",
+        description="Raw security events from OTel Collector",
+        partitions=2,
     ),
     TOPIC_SECURITY_EVENTS: TopicSpec(
         name=TOPIC_SECURITY_EVENTS,
-        producer="ingestion",
-        consumer="predictive/security",
-        description="Security events from simulation / external sources",
+        producer="simulation",
+        consumer="flink-ingestion",
+        description="Security events from simulation / external sources (legacy)",
+        partitions=2,
     ),
+    # Normalized topics (Flink → downstream layers)
+    TOPIC_METRICS_NORMALIZED: TopicSpec(
+        name=TOPIC_METRICS_NORMALIZED,
+        producer="flink-ingestion",
+        consumer="entity-resolution",
+        description="Normalized metric data from Flink",
+        partitions=3,
+    ),
+    TOPIC_LOGS_NORMALIZED: TopicSpec(
+        name=TOPIC_LOGS_NORMALIZED,
+        producer="flink-ingestion",
+        consumer="entity-resolution",
+        description="Normalized log data from Flink",
+        partitions=3,
+    ),
+    TOPIC_TRACES_NORMALIZED: TopicSpec(
+        name=TOPIC_TRACES_NORMALIZED,
+        producer="flink-ingestion",
+        consumer="entity-resolution",
+        description="Normalized trace data from Flink",
+        partitions=3,
+    ),
+    TOPIC_EVENTS_NORMALIZED: TopicSpec(
+        name=TOPIC_EVENTS_NORMALIZED,
+        producer="flink-ingestion",
+        consumer="entity-resolution",
+        description="Normalized event data from Flink",
+        partitions=2,
+    ),
+    TOPIC_SECURITY_NORMALIZED: TopicSpec(
+        name=TOPIC_SECURITY_NORMALIZED,
+        producer="flink-ingestion",
+        consumer="entity-resolution",
+        description="Normalized security events from Flink",
+        partitions=2,
+    ),
+    # Downstream topics (Phase 3+)
     TOPIC_ANOMALIES_DETECTED: TopicSpec(
         name=TOPIC_ANOMALIES_DETECTED,
         producer="predictive",
