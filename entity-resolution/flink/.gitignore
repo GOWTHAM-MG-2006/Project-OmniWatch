@@ -1,0 +1,20 @@
+# OmniWatch — Entity Resolution Layer
+# Component: Gradle/gitignore
+# Phase: 3
+# Purpose: Exclude build artifacts from version control
+
+.gradle/
+build/
+bin/
+
+# Eclipse/IDE metadata
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local env
+*.log

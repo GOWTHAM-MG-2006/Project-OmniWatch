@@ -1,0 +1,8 @@
+/*
+ * OmniWatch — Entity Resolution Layer
+ * Component: Gradle settings
+ * Phase: 3
+ * Purpose: Root project name for the entity-resolution Flink module
+ */
+
+rootProject.name = 'omniwatch-entity-resolution'
