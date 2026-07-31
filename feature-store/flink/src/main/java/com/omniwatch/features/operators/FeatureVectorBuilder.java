@@ -8,7 +8,7 @@
  *          emits a FeatureVector on every incoming WindowedFeature using the
  *          latest merged statistics.
  * Inputs: WindowedFeature (union of omniwatch.features.windowed_{1m,5m,15m})
- * Outputs: FeatureVector → Kafka omniwatch.features.windowed_15m +
+ * Outputs: FeatureVector → Kafka omniwatch.features.vector +
  *          ClickHouse feature_vectors table (via FeatureStoreWriter)
  */
 package com.omniwatch.features.operators;

@@ -24,6 +24,6 @@ RUN gradle clean shadowJar --no-daemon
 FROM flink:1.17-scala_2.12
 
 # Copy the built job jar into the Flink lib directory
-COPY --from=builder /app/build/libs/omniwatch-feature-store-job.jar /opt/flink/lib/
+COPY --from=builder /app/build/libs/omniwatch-feature-store-job.jar /opt/flink/jobs/
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

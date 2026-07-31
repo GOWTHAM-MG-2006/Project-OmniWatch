@@ -20,8 +20,16 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -82,6 +90,11 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
             + "feature_version, ttl, timestamp) "
             + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
+    /** Formatter for ClickHouse DateTime columns (yyyy-MM-dd HH:mm:ss UTC). */
+    private static final DateTimeFormatter CH_DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                    .withZone(ZoneOffset.UTC);
+
     /** JDBC driver class name (defensive registration). */
     private static final String CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver";
 
@@ -105,6 +118,15 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
     private transient List<FeatureVector> buffer;
     private transient long lastFlushMs;
 
+    /** Lock guarding buffer, lastFlushMs, and the flush path. Re-created in open() after deserialization. */
+    private transient Object bufferLock = new Object();
+
+    /** Background flush scheduler — started in open(), shut down in close(). */
+    private transient ScheduledExecutorService scheduler;
+
+    /** Set to true in close() to prevent the scheduled task from writing to a closed connection. */
+    private transient volatile boolean closed;
+
     /** Counter of batches dropped after exhausting retries. */
     static final AtomicLong droppedBatches = new AtomicLong(0);
 
@@ -121,35 +143,62 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
         connection = DriverManager.getConnection(url);
         buffer = new ArrayList<>(BATCH_SIZE);
         lastFlushMs = System.currentTimeMillis();
+        closed = false;
+        bufferLock = new Object();
 
-        // Ensure the feature_vectors table exists.
         try (PreparedStatement ps = connection.prepareStatement(DDL)) {
             ps.execute();
         }
-        LOG.info("FeatureStoreWriter opened — target table feature_vectors ready");
+
+        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "feature-store-writer-flush");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduler.scheduleWithFixedDelay(
+                this::scheduledFlush,
+                FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+
+        LOG.info("FeatureStoreWriter opened — target table feature_vectors ready, "
+                + "background flush every {} ms", FLUSH_INTERVAL_MS);
     }
 
     @Override
     public void invoke(FeatureVector value, Context context) {
-        buffer.add(value);
-        long now = System.currentTimeMillis();
-        if (buffer.size() >= BATCH_SIZE
-                || (now - lastFlushMs >= FLUSH_INTERVAL_MS && !buffer.isEmpty())) {
-            flush();
+        synchronized (bufferLock) {
+            buffer.add(value);
+            long now = System.currentTimeMillis();
+            if (buffer.size() >= BATCH_SIZE
+                    || (now - lastFlushMs >= FLUSH_INTERVAL_MS && !buffer.isEmpty())) {
+                doFlush();
+            }
         }
     }
 
     @Override
     public void close() throws Exception {
-        flush();
+        closed = true;
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+            scheduler.awaitTermination(5, TimeUnit.SECONDS);
+        }
+        synchronized (bufferLock) {
+            doFlush();
+        }
         if (connection != null && !connection.isClosed()) {
             connection.close();
             LOG.info("FeatureStoreWriter connection closed");
         }
     }
 
-    /** Flush the current buffer to ClickHouse with retry + drop semantics. */
     void flush() {
+        synchronized (bufferLock) {
+            doFlush();
+        }
+    }
+
+    private void doFlush() {
         if (buffer == null || buffer.isEmpty()) {
             return;
         }
@@ -157,6 +206,18 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
         buffer.clear();
         lastFlushMs = System.currentTimeMillis();
         executeBatchInsert(connection, batch);
+    }
+
+    private void scheduledFlush() {
+        if (closed) {
+            return;
+        }
+        synchronized (bufferLock) {
+            if (closed) {
+                return;
+            }
+            doFlush();
+        }
     }
 
     // ---- Testable static methods ----
@@ -178,8 +239,8 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
                 PreparedStatement ps = conn.prepareStatement(INSERT_SQL);
                 for (FeatureVector fv : batch) {
                     ps.setString(1, fv.getEntityId());
-                    ps.setString(2, fv.getWindowStart());
-                    ps.setString(3, fv.getWindowEnd());
+                    ps.setString(2, toClickHouseDateTime(fv.getWindowStart()));
+                    ps.setString(3, toClickHouseDateTime(fv.getWindowEnd()));
                     ps.setString(4, fv.getWindowSize());
                     ps.setDouble(5, fv.getLatencyP50());
                     ps.setDouble(6, fv.getLatencyP95());
@@ -191,7 +252,7 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
                     ps.setLong(12, fv.getRequestVolume());
                     ps.setInt(13, fv.getFeatureVersion());
                     ps.setInt(14, fv.getTtl());
-                    ps.setString(15, fv.getTimestamp());
+                    ps.setString(15, toClickHouseDateTime(fv.getTimestamp()));
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -220,6 +281,34 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
     /** Return the number of batches dropped due to write failures. */
     public static long getDroppedBatches() {
         return droppedBatches.get();
+    }
+
+    /**
+     * Converts an ISO-8601 timestamp string (e.g. "2026-07-31T18:03:00Z") to
+     * ClickHouse DateTime format ("yyyy-MM-dd HH:mm:ss" in UTC).
+     */
+    static String toClickHouseDateTime(String isoTimestamp) {
+        if (isoTimestamp == null || isoTimestamp.isEmpty()) {
+            return isoTimestamp;
+        }
+        try {
+            Instant instant = Instant.parse(isoTimestamp);
+            return CH_DATE_TIME_FORMATTER.format(instant);
+        } catch (Exception e) {
+            LOG.error("Failed to convert timestamp to ClickHouse format: {}", isoTimestamp, e);
+            return isoTimestamp;
+        }
+    }
+
+    /**
+     * Re-initialize transient fields that cannot survive Java serialization.
+     * Called automatically by {@link ObjectInputStream} after deserialization.
+     * Without this, {@code bufferLock} would be null post-deserialization,
+     * causing NullPointerException in {@link #invoke} and {@link #flush}.
+     */
+    private void readObject(ObjectInputStream ois) throws IOException, ClassNotFoundException {
+        ois.defaultReadObject();
+        bufferLock = new Object();
     }
 
     /** Reset the dropped-batches counter (for test isolation). */

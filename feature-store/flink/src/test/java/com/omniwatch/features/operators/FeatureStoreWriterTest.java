@@ -14,6 +14,10 @@ import com.omniwatch.features.models.FeatureVector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -304,5 +308,29 @@ class FeatureStoreWriterTest {
         assertEquals(1000L, FeatureStoreWriter.FLUSH_INTERVAL_MS);
         assertEquals(3, FeatureStoreWriter.MAX_RETRIES);
         assertArrayEquals(new long[]{100L, 500L, 2000L}, FeatureStoreWriter.RETRY_DELAYS_MS);
+    }
+
+    // ================================================================
+    // Test 10: Serialization round-trip preserves bufferLock for Flink
+    // ================================================================
+
+    @Test
+    void serializationRoundTripKeepsLockUsable() throws Exception {
+        FeatureStoreWriter original = new FeatureStoreWriter("localhost", 9000, "db");
+
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(bos);
+        oos.writeObject(original);
+        oos.close();
+
+        ByteArrayInputStream bis = new ByteArrayInputStream(bos.toByteArray());
+        ObjectInputStream ois = new ObjectInputStream(bis);
+        FeatureStoreWriter deserialized = (FeatureStoreWriter) ois.readObject();
+        ois.close();
+
+        Field bufferLockField = FeatureStoreWriter.class.getDeclaredField("bufferLock");
+        bufferLockField.setAccessible(true);
+        Object lock = bufferLockField.get(deserialized);
+        assertNotNull(lock, "bufferLock must survive Java serialization round-trip");
     }
 }

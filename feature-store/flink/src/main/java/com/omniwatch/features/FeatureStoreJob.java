@@ -7,9 +7,10 @@
  *          sliding (5m/1m), and session (30s gap) window operators producing
  *          omniwatch.features.windowed_{1m,5m,15m}. A second pipeline reads
  *          the three windowed topics, builds FeatureVectors, and sinks to both
- *          Kafka (omniwatch.features.windowed_15m) and ClickHouse (feature_vectors).
+ *          Kafka (omniwatch.features.vector) and ClickHouse (feature_vectors).
  * Inputs: omniwatch.metrics.normalized (Kafka)
- * Outputs: omniwatch.features.windowed_{1m,5m,15m} (Kafka), feature_vectors (ClickHouse)
+ * Outputs: omniwatch.features.windowed_{1m,5m,15m} (Kafka),
+ *          omniwatch.features.vector (Kafka), feature_vectors (ClickHouse)
  */
 package com.omniwatch.features;
 
@@ -69,6 +70,9 @@ public final class FeatureStoreJob {
     static final String OUTPUT_TOPIC_WINDOWED_1M = "omniwatch.features.windowed_1m";
     static final String OUTPUT_TOPIC_WINDOWED_5M = "omniwatch.features.windowed_5m";
     static final String OUTPUT_TOPIC_WINDOWED_15M = "omniwatch.features.windowed_15m";
+
+    /** Vector output topic (consumed by Phase 6, NOT by this job's windowed-source). */
+    static final String OUTPUT_TOPIC_VECTORS = "omniwatch.features.vector";
 
     private FeatureStoreJob() {
     }
@@ -182,11 +186,11 @@ public final class FeatureStoreJob {
                 .keyBy(WindowedFeature::getEntityId)
                 .process(new FeatureVectorBuilder());
 
-        // Sink FeatureVectors to Kafka
+        // Sink FeatureVectors to Kafka (disjoint topic — NOT consumed by windowed-source)
         featureVectors
                 .map(vec -> serialize(mapper, vec))
                 .returns(Types.STRING)
-                .sinkTo(createSink(config.kafkaBrokers, OUTPUT_TOPIC_WINDOWED_15M))
+                .sinkTo(createSink(config.kafkaBrokers, OUTPUT_TOPIC_VECTORS))
                 .name("sink-feature-vectors-kafka");
 
         // Sink FeatureVectors to ClickHouse
@@ -197,7 +201,7 @@ public final class FeatureStoreJob {
 
         LOG.info("Feature store job graph built: {} -> windowed sinks | windowed sources -> "
                 + "FeatureVectorBuilder -> {} + ClickHouse", INPUT_TOPIC,
-                OUTPUT_TOPIC_WINDOWED_15M);
+                OUTPUT_TOPIC_VECTORS);
         return env;
     }
 
@@ -282,6 +286,7 @@ public final class FeatureStoreJob {
                             Iterable<WindowedFeature> elements,
                             Collector<WindowedFeature> out) {
             for (WindowedFeature wf : elements) {
+                wf.setEntityId(key);
                 wf.setWindowStart(ctx.window().getStart());
                 wf.setWindowEnd(ctx.window().getEnd());
                 out.collect(wf);
