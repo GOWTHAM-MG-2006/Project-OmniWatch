@@ -1,0 +1,9 @@
+{
+  "entity_id": "postgresql-database",
+  "attack_type": "BRUTE_FORCE_ATTEMPT",
+  "confidence": 0.85,
+  "source_ip": "192.168.1.100",
+  "description": "Multiple failed login attempts detected",
+  "severity": "HIGH",
+  "timestamp": "1715000000000"
+}

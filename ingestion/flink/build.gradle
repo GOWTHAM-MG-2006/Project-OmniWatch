@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+sourceCompatibility = JavaVersion.VERSION_11
+targetCompatibility = JavaVersion.VERSION_11
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Flink core
+    implementation "org.apache.flink:flink-streaming-java:1.17.2"
+    implementation "org.apache.flink:flink-connector-kafka:1.17.2"
+    implementation "org.apache.flink:flink-json:1.17.2"
+    implementation "org.apache.flink:flink-parquet:1.17.2"
+    implementation "org.apache.flink:flink-clients:1.17.2"
+
+    // Hadoop + Parquet for object store writes
+    implementation "org.apache.hadoop:hadoop-common:3.3.6"
+    implementation "org.apache.parquet:parquet-avro:1.13.1"
+
+    // MinIO S3-compatible storage client
+    implementation "io.minio:minio:8.5.7"
+
+    // Testing
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.1"
+    testImplementation "org.apache.flink:flink-test-utils:1.17.2"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+shadowJar {
+    archiveBaseName = 'omniwatch-ingestion-job'
+    mergeServiceFiles()
+}

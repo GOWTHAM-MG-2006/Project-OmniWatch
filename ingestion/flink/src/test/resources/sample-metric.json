@@ -1,0 +1,33 @@
+{
+  "resourceMetrics": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "frontend-service" }
+          }
+        ]
+      },
+      "scopeMetrics": [
+        {
+          "scope": { "name": "test-scope" },
+          "metrics": [
+            {
+              "name": "http_requests_total",
+              "unit": "count",
+              "gauge": {
+                "dataPoints": [
+                  {
+                    "timeUnixNano": "1715000000000123456",
+                    "asDouble": 42.5
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

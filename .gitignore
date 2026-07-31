@@ -45,6 +45,18 @@ CLAUDE.md
 *.parquet
 data/
 
+# Gradle / Java build
+*.class
+*.jar
+bin/
+.gradle/
+build/
+
+# IDE
+.classpath
+.project
+.settings/
+
 #Project_Details
 Project_Source_Files/
 Agents.md

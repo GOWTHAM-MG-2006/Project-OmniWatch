@@ -1,0 +1,28 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "api-gateway" }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": { "name": "test-scope" },
+          "logRecords": [
+            {
+              "timeUnixNano": "1715000000000123456",
+              "severityNumber": 9,
+              "body": { "stringValue": "Request processed successfully" },
+              "traceId": "abcd1234abcd1234abcd1234abcd1234",
+              "spanId": "abcd1234abcd1234"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

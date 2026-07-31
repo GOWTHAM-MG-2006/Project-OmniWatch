@@ -1,0 +1,36 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "backend-worker" }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "test-scope" },
+          "spans": [
+            {
+              "traceId": "abcd1234abcd1234abcd1234abcd1234",
+              "spanId": "ef01ef01ef01ef01",
+              "parentSpanId": "0000000000000000",
+              "name": "process_request",
+              "startTimeUnixNano": "1715000000000000000",
+              "endTimeUnixNano": "1715000000000500000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "http.method",
+                  "value": { "stringValue": "GET" }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
