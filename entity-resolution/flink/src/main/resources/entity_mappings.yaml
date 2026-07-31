@@ -1,0 +1,85 @@
+# OmniWatch — Entity Resolution Layer
+# Component: entity mappings
+# Phase: 3
+# Purpose: Maps raw entity identifiers from normalized telemetry events to
+#          provider/region/entity_type + canonical name. Looked up by
+#          (provider, entity_type) key -> extraction regex patterns.
+# Inputs: ResourceIdParser (raw entity_id strings)
+# Outputs: provider, region, entity_type, name
+
+# Each mapping has:
+#   patterns:    ordered list of { regex, name_index, region_index, type }
+#                group indices are 1-based capture groups in `regex`
+#   type:        canonical entity_type assigned when the pattern matches
+
+mappings:
+  - provider: gcp
+    entity_type: compute
+    patterns:
+      - regex: "^projects/(?<project>[^/]+)/zones/(?<zone>[^/]+)/instances/(?<name>[^/]+)$"
+        type: API_NODE
+      - regex: "^gcp:compute:instance/(?<name>.+)$"
+        type: API_NODE
+    region_from_zone: true
+    zone_to_region:
+      us-central1-a: us-central1
+      us-central1-b: us-central1
+      us-central1-c: us-central1
+      us-east1-b: us-east1
+      us-east1-c: us-east1
+      us-west1-a: us-west1
+      us-west1-b: us-west1
+      europe-west1-b: europe-west1
+      europe-west1-c: europe-west1
+      asia-southeast1-a: asia-southeast1
+      asia-southeast1-b: asia-southeast1
+
+  - provider: aws
+    entity_type: ec2
+    patterns:
+      - regex: "^arn:aws:ec2:(?<region>[^:]+):(?<account>[^:]+):instance/(?<name>[^/]+)$"
+        type: API_NODE
+      - regex: "^aws:ec2:instance/(?<name>.+)$"
+        type: API_NODE
+      - regex: "^i-[0-9a-f]{8,17}$"
+        type: API_NODE
+
+  - provider: azure
+    entity_type: vm
+    patterns:
+      - regex: "^/subscriptions/(?<subscription>[^/]+)/resourceGroups/(?<rg>[^/]+)/providers/Microsoft.Compute/virtualMachines/(?<name>[^/]+)$"
+        type: API_NODE
+      - regex: "^azure:vm:(?<name>.+)$"
+        type: API_NODE
+
+  - provider: k8s
+    entity_type: pod
+    patterns:
+      - regex: "^(?<namespace>[a-z0-9-]+)/(?<name>[a-z0-9-]+)-(?<hash>[a-z0-9]{5})$"
+        type: API_NODE
+      - regex: "^k8s:pod:(?<namespace>.*)/(?<name>.+)$"
+        type: API_NODE
+      - regex: "^k8s:(?<name>[a-z0-9-]+)$"
+        type: API_NODE
+
+  - provider: gcp
+    entity_type: database
+    patterns:
+      - regex: "^projects/(?<project>[^/]+)/instances/(?<name>[^/]+)$"
+        type: DATABASE_NODE
+
+  - provider: aws
+    entity_type: database
+    patterns:
+      - regex: "^arn:aws:rds:(?<region>[^:]+):(?<account>[^:]+):db:(?<name>[^/]+)$"
+        type: DATABASE_NODE
+      - regex: "^aws:rds:db/(?<name>.+)$"
+        type: DATABASE_NODE
+
+  - provider: k8s
+    entity_type: service
+    patterns:
+      - regex: "^service/(?<namespace>[a-z0-9-]+)/(?<name>[a-z0-9-]+)$"
+        type: API_NODE
+      - regex: "^k8s:service:(?<namespace>.*)/(?<name>.+)$"
+        type: API_NODE

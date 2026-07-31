@@ -1,0 +1,52 @@
+# OmniWatch — Entity Resolution Layer
+# Component: business tags
+# Phase: 3
+# Purpose: Enriches resolved entities with business metadata. Tag values are
+#          looked up by entity_type (and optionally by name/attribute regex).
+#          A matching rule overrides the entity_type default.
+# Inputs: EntityEnricher (resolved entity)
+# Outputs: business_tags {service_name, environment, owner_team, criticality, sla_tier}
+
+defaults:
+  criticality: LOW
+  sla_tier: "Best Effort"
+
+by_entity_type:
+  DATABASE_NODE:
+    criticality: HIGH
+    sla_tier: "24x7"
+  API_NODE:
+    criticality: MEDIUM
+    sla_tier: "Business Hours"
+
+rules:
+  # Name-prefix based overrides (evaluated in order, first match wins)
+  - entity_type: DATABASE_NODE
+    name_regex: "^(postgres|mysql|mongo)"
+    service_name: "data-tier"
+    owner_team: "platform-db"
+    environment: "prod"
+  - entity_type: API_NODE
+    name_regex: "^(payment|checkout)"
+    service_name: "payments"
+    owner_team: "payments-team"
+    criticality: CRITICAL
+    sla_tier: "24x7"
+  - entity_type: API_NODE
+    name_regex: "^(catalog|product)"
+    service_name: "catalog"
+    owner_team: "catalog-team"
+  - entity_type: API_NODE
+    name_regex: "^frontend"
+    service_name: "frontend"
+    owner_team: "web-team"
+  - entity_type: API_NODE
+    name_regex: "^(recommendation|checkoutservice|productcatalogservice|frontend)"
+    service_name: "shop"
+    owner_team: "ecommerce-team"
+
+  # Fallback: derive service_name from the entity name when no rule matched
+  - entity_type: API_NODE
+    name_regex: ".*"
+    service_name: "default-service"
+    owner_team: "platform-team"
