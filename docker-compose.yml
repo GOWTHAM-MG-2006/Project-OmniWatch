@@ -224,6 +224,34 @@ services:
       start_period: 120s
 
   # ---------------------------------------------------------------------------
+  # Entity Resolution — Phase 3 Flink job (submitted to the shared cluster)
+  # ---------------------------------------------------------------------------
+  entity-resolution:
+    build:
+      context: ./entity-resolution/flink
+      dockerfile: Dockerfile
+    container_name: omniwatch-entity-resolution
+    command: ["sleep", "infinity"]
+    networks:
+      - omniwatch-network
+    volumes:
+      - ./entity-resolution/flink/build/libs:/jobs
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      OUTPUT_TOPICS: omniwatch.entities.resolved;omniwatch.entities.relationships
+    depends_on:
+      kafka:
+        condition: service_healthy
+      flink-jobmanager:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
   # MinIO Bucket Init — creates required buckets before Flink starts
   # ---------------------------------------------------------------------------
   minio-bucket-init:
