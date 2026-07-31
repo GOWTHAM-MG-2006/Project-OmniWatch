@@ -1,0 +1,103 @@
+/*
+ * OmniWatch — Windowing Layer + Feature Store
+ * Component: feature-store Flink job build
+ * Phase: 4
+ * Purpose: Gradle build configuration for the Phase 4 feature store
+ *          Flink job (TumblingWindowAggregator -> SlidingWindowAggregator
+ *          -> SessionWindowDetector -> FeatureVectorBuilder -> FeatureStoreWriter)
+ * Inputs: Gradle project sources
+ * Outputs: omniwatch-feature-store-job.jar (shadow jar)
+ */
+
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+application {
+    mainClass = 'com.omniwatch.features.FeatureStoreJob'
+}
+
+group = 'flink-feature-store'
+version = '1.0.0'
+
+sourceCompatibility = JavaVersion.VERSION_11
+targetCompatibility = JavaVersion.VERSION_11
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Flink core + connectors (version must match Phase 2 ingestion job)
+    // compileOnly: these are provided by the Flink cluster's flink-dist-*.jar
+    compileOnly 'org.apache.flink:flink-streaming-java:1.17.2'
+    compileOnly 'org.apache.flink:flink-clients:1.17.2'
+    compileOnly 'org.apache.flink:flink-json:1.17.2'
+
+    // Kafka connector: NOT bundled in the Flink Docker image, must be in shadow jar.
+    // Exclude Flink core transitive deps (provided by flink-dist on the cluster)
+    // to avoid LinkageError from duplicate classes.
+    // kafka-clients IS bundled in the shadow jar (needed at runtime — Flink's
+    // ChildFirstClassLoader loads it; not present in flink-dist-*.jar).
+    implementation('org.apache.flink:flink-connector-kafka:1.17.2') {
+        exclude group: 'org.apache.flink', module: 'flink-streaming-java'
+        exclude group: 'org.apache.flink', module: 'flink-clients'
+        exclude group: 'org.apache.flink', module: 'flink-json'
+        exclude group: 'org.apache.flink', module: 'flink-core'
+        exclude group: 'org.apache.flink', module: 'flink-runtime'
+        exclude group: 'org.apache.flink', module: 'flink-queryable-state-client-java'
+        exclude group: 'org.apache.flink', module: 'flink-hadoop-compatibility'
+    }
+
+    // MinIO sink for archived feature snapshots
+    implementation 'io.minio:minio:8.5.7'
+
+    // YAML config parsing for window config
+    implementation 'org.yaml:snakeyaml:2.2'
+
+    // Structured logging (SLF4J API, Flink ships the implementation)
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+
+    // ClickHouse JDBC driver for the FeatureStoreWriter sink (feature_vectors table)
+    implementation 'com.clickhouse:clickhouse-jdbc:0.6.4'
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+    testImplementation 'org.apache.flink:flink-test-utils:1.17.2'
+    testImplementation 'org.apache.flink:flink-runtime:1.17.2'
+    testImplementation 'org.apache.flink:flink-streaming-java:1.17.2'
+    testImplementation 'org.apache.flink:flink-streaming-java:1.17.2:tests'
+    testImplementation 'io.minio:minio:8.5.7'
+}
+
+test {
+    useJUnitPlatform()
+
+    // Flink 1.17 on JDK 17+ uses reflective access (Kryo serialization,
+    // ClosureCleaner, StreamRecord) that requires these --add-opens flags.
+    jvmArgs '--add-opens=java.base/java.util=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+            '--add-opens=java.base/java.text=ALL-UNNAMED',
+            '--add-opens=java.base/java.time=ALL-UNNAMED',
+            '--add-opens=java.base/java.io=ALL-UNNAMED',
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.net=ALL-UNNAMED'
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}
+
+shadowJar {
+    archiveBaseName = 'omniwatch-feature-store-job'
+    archiveClassifier = ''
+    archiveVersion = ''
+    mergeServiceFiles()
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}

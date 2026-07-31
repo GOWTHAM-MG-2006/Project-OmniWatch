@@ -1,0 +1,23 @@
+# OmniWatch — Windowing Layer + Feature Store
+# Component: Gradle/gitignore
+# Phase: 4
+# Purpose: Exclude build artifacts from version control
+
+.gradle/
+build/
+bin/
+
+# Eclipse/IDE metadata
+.classpath
+.project
+.settings/
+
+# Captured build logs
+build-output.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local env
+*.log

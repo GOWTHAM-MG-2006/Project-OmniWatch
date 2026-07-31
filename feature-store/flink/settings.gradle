@@ -1,0 +1,8 @@
+/*
+ * OmniWatch — Windowing Layer + Feature Store
+ * Component: Gradle settings
+ * Phase: 4
+ * Purpose: Root project name for the feature-store Flink module
+ */
+
+rootProject.name = 'omniwatch-feature-store'
