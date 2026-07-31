@@ -1,0 +1,19 @@
+# OmniWatch — Phase 4 Windowing Layer + Feature Store
+# Component: feature-store-api Service (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-store-api
+  namespace: omniwatch
+  labels:
+    app: feature-store-api
+    tier: backend
+    phase: "4"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8005
+      targetPort: 8005
+      name: http
+  selector:
+    app: feature-store-api

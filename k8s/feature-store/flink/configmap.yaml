@@ -1,0 +1,16 @@
+# OmniWatch — Phase 4 Windowing Layer + Feature Store
+# Component: feature-store-flink ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-store-flink-config
+  namespace: omniwatch
+  labels:
+    app: feature-store-flink
+    tier: backend
+    phase: "4"
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DB: omniwatch
