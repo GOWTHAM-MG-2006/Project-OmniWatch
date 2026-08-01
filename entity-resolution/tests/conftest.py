@@ -13,6 +13,34 @@ from typing import Optional
 import pytest
 import requests
 
+
+def _json_codec():
+    """Return a kafka-python Serializer/Deserializer for JSON payloads.
+
+    Defined lazily (kafka import guarded) to preserve the pytest.skip
+    behavior of the fixtures below when kafka-python is not installed.
+    Replaces legacy callable-based serializers, which emit a
+    DeprecationWarning on kafka-python >= 3 (plain callables no longer
+    implement kafka.serializer.Serializer/Deserializer).
+    """
+    from typing import Any
+
+    from kafka.serializer.abstract import Deserializer as KDeserializer
+    from kafka.serializer.abstract import Serializer as KSerializer
+
+    class _JsonCodec(KSerializer, KDeserializer):
+        def serialize(self, topic, headers, data) -> Any:
+            if data is None:
+                return None
+            return json.dumps(data).encode("utf-8")
+
+        def deserialize(self, topic, headers, data) -> Any:
+            if data is None:
+                return None
+            return json.loads(data.decode("utf-8"))
+
+    return _JsonCodec()
+
 KAFKA_BROKERS = "127.0.0.1:9092"
 OUTPUT_RESOLVED = "omniwatch.entities.resolved"
 OUTPUT_RELATIONSHIPS = "omniwatch.entities.relationships"
@@ -64,7 +92,7 @@ def kafka_producer():
     from kafka import KafkaProducer
     producer = KafkaProducer(
         bootstrap_servers=KAFKA_BROKERS,
-        value_serializer=lambda m: json.dumps(m).encode("utf-8"),
+        value_serializer=_json_codec(),
     )
     yield producer
     producer.close()
@@ -82,11 +110,11 @@ def test_group_id():
 
 def make_event(entity_id: str, entity_type: str = "API_NODE",
                source_type: str = "performance",
-               trace_id: str = None, span_id: str = None,
-               parent_span_id: str = None,
-               span_name: str = None,
-               duration_ms: int = None,
-               status: str = None) -> dict:
+               trace_id: Optional[str] = None, span_id: Optional[str] = None,
+               parent_span_id: Optional[str] = None,
+               span_name: Optional[str] = None,
+               duration_ms: Optional[int] = None,
+               status: Optional[str] = None) -> dict:
     """Build a TelemetryEvent JSON dict (snake_case for Jackson SNAKE_CASE mapper)."""
     event = {
         "entity_id": entity_id,
@@ -128,7 +156,7 @@ def consume_filtered(topic: str, group_id: str, predicate, timeout: int = 30):
         group_id=group_id,
         auto_offset_reset="earliest",
         consumer_timeout_ms=timeout * 1000,
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")) if m else None,
+        value_deserializer=_json_codec(),
         enable_auto_commit=False,
     )
     try:
@@ -152,7 +180,7 @@ def consume_all_matching(topic: str, group_id: str, predicate, timeout: int = 30
         group_id=group_id,
         auto_offset_reset="earliest",
         consumer_timeout_ms=timeout * 1000,
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")) if m else None,
+        value_deserializer=_json_codec(),
         enable_auto_commit=False,
     )
     try:
