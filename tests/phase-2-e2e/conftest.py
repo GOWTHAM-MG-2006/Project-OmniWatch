@@ -17,7 +17,7 @@ def otelcol_service():
             r = requests.get("http://localhost:8888/metrics", timeout=2)
             if r.status_code == 200:
                 return
-        except requests.ConnectionError:
+        except Exception:  # ConnectionError, Timeout, OSError on Python 3.14+
             pass
         time.sleep(1)
     pytest.fail("OTel Collector not healthy within 30s")
