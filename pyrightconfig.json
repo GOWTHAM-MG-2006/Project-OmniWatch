@@ -1,6 +1,4 @@
 {
-    "venvPath": "${workspaceFolder}/simulation/.venv",
-    "venv": "${workspaceFolder}/simulation/.venv",
     "pythonVersion": "3.14",
     "extraPaths": [
         "${workspaceFolder}/ingestion",

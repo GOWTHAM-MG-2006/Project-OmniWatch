@@ -264,7 +264,11 @@ services:
       "sleep 5 &&
        mc alias set omniwatch http://minio:9010 minioadmin minioadmin &&
        mc mb omniwatch/omniwatch-telemetry-archive --ignore-existing &&
-       echo 'Bucket ready'"
+       mc mb omniwatch/omniwatch-incidents --ignore-existing &&
+       mc mb omniwatch/omniwatch-audit-logs --ignore-existing &&
+       mc mb omniwatch/omniwatch-runbooks --ignore-existing &&
+       mc mb omniwatch/omniwatch-ml-datasets --ignore-existing &&
+       echo 'All 5 buckets ready'"
     depends_on:
       minio:
         condition: service_healthy

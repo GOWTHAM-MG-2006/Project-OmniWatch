@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-config
+  namespace: omniwatch
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: omniwatch
+data:
+  MINIO_ENDPOINT: minio:9010
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_SECURE: "false"
