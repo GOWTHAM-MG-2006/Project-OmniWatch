@@ -234,6 +234,108 @@ class TestClickHouseClient:
         mock_ch.close.assert_called_once()
         assert client._client is None
 
+    # ------------------------------------------------------------------ #
+    # select_metrics_baseline
+    # ------------------------------------------------------------------ #
+
+    @patch("storage.clickhouse.client.clickhouse_connect.get_client")
+    def test_clickhouse_select_metrics_baseline_returns_aggregated_stats(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """select_metrics_baseline returns avg, stddev, p95, count from mock."""
+        from datetime import datetime
+
+        from storage.clickhouse.client import ClickHouseClient
+
+        mock_ch = MagicMock()
+        mock_result = MagicMock()
+        mock_result.column_names = ["avg", "stddev", "p95", "cnt"]
+        mock_result.result_rows = [(75.0, 10.5, 92.0, 500)]
+        mock_ch.query.return_value = mock_result
+        mock_get_client.return_value = mock_ch
+
+        client = ClickHouseClient(config=_cfg())
+        result = client.select_metrics_baseline(
+            entity_id="svc-1",
+            start=datetime(2026, 8, 1),
+            end=datetime(2026, 8, 2),
+            metric_name="cpu_usage",
+        )
+
+        assert result == {"avg": 75.0, "stddev": 10.5, "p95": 92.0, "count": 500}
+
+    @patch("storage.clickhouse.client.clickhouse_connect.get_client")
+    def test_clickhouse_select_metrics_baseline_empty_returns_zeros(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """select_metrics_baseline returns zeros when no rows match."""
+        from datetime import datetime
+
+        from storage.clickhouse.client import ClickHouseClient
+
+        mock_ch = MagicMock()
+        mock_result = MagicMock()
+        mock_result.column_names = ["avg", "stddev", "p95", "cnt"]
+        mock_result.result_rows = []
+        mock_ch.query.return_value = mock_result
+        mock_get_client.return_value = mock_ch
+
+        client = ClickHouseClient(config=_cfg())
+        result = client.select_metrics_baseline(
+            entity_id="svc-1",
+            start=datetime(2026, 8, 1),
+            end=datetime(2026, 8, 2),
+            metric_name="cpu_usage",
+        )
+
+        assert result == {"avg": 0.0, "stddev": 0.0, "p95": 0.0, "count": 0}
+
+    @patch("storage.clickhouse.client.clickhouse_connect.get_client")
+    def test_clickhouse_select_metrics_baseline_invalid_metric_name_raises(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """select_metrics_baseline rejects SQL-injection-style metric_name."""
+        from datetime import datetime
+
+        from storage.clickhouse.client import ClickHouseClient
+
+        mock_get_client.return_value = MagicMock()
+        client = ClickHouseClient(config=_cfg())
+
+        with pytest.raises(ValueError, match="invalid metric_name"):
+            client.select_metrics_baseline(
+                entity_id="svc-1",
+                start=datetime(2026, 8, 1),
+                end=datetime(2026, 8, 2),
+                metric_name="1; DROP TABLE",
+            )
+
+    @patch("storage.clickhouse.client.clickhouse_connect.get_client")
+    def test_clickhouse_select_metrics_baseline_none_values_return_zeros(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """select_metrics_baseline handles NULL aggregates (single row with NULLs)."""
+        from datetime import datetime
+
+        from storage.clickhouse.client import ClickHouseClient
+
+        mock_ch = MagicMock()
+        mock_result = MagicMock()
+        mock_result.column_names = ["avg", "stddev", "p95", "cnt"]
+        mock_result.result_rows = [(None, None, None, 0)]
+        mock_ch.query.return_value = mock_result
+        mock_get_client.return_value = mock_ch
+
+        client = ClickHouseClient(config=_cfg())
+        result = client.select_metrics_baseline(
+            entity_id="svc-1",
+            start=datetime(2026, 8, 1),
+            end=datetime(2026, 8, 2),
+            metric_name="cpu_usage",
+        )
+
+        assert result == {"avg": 0.0, "stddev": 0.0, "p95": 0.0, "count": 0}
+
 
 # ===================================================================
 # Neo4j Client

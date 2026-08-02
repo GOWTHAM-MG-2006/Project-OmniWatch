@@ -89,7 +89,12 @@ CREATE TABLE IF NOT EXISTS omniwatch.anomalies
     deviation_from_baseline  Float64,  -- signed deviation magnitude
     source_type              String,   -- "performance" or "security"
     status                   String,   -- active, resolved, deduplicated, etc.
-    timestamp                DateTime  -- UTC detection time; partition + TTL key
+    timestamp                DateTime, -- UTC detection time; partition + TTL key
+    attack_type              String,   -- BRUTE_FORCE, PRIVILEGE_ESCALATION, etc. (Phase 6 security)
+    severity                 String,   -- HIGH or CRITICAL (Phase 6 security)
+    evidence_logs            String,   -- JSON-encoded list of evidence log lines (Phase 6 security)
+    recommended_action       Nullable(String), -- nullable remediation hint (Phase 6 security)
+    source_ip                Nullable(String)  -- nullable attacker IP (Phase 6 security)
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(timestamp)

@@ -54,6 +54,11 @@ ANOMALIES_COLUMNS: list[str] = [
     "source_type",
     "status",
     "timestamp",
+    "attack_type",
+    "severity",
+    "evidence_logs",
+    "recommended_action",
+    "source_ip",
 ]
 INCIDENTS_COLUMNS: list[str] = [
     "incident_id",
@@ -73,6 +78,7 @@ INCIDENTS_COLUMNS: list[str] = [
 
 # List-valued columns stored as JSON strings (schema.sql stores serialized arrays).
 INCIDENTS_JSON_COLUMNS: set[str] = {"fault_path", "impacted_services"}
+ANOMALIES_JSON_COLUMNS: set[str] = {"evidence_logs"}
 
 # Map(String, String) columns — accept a dict, or a pre-serialized JSON object.
 MAP_COLUMNS: set[str] = {"tags"}
@@ -89,6 +95,7 @@ SELECT_TABLES: set[str] = {
     "incidents",
     "pending_approvals",
     "knowledge_base",
+    "feature_vectors",
 }
 
 # Tables whose time column is created_at (no timestamp column in schema.sql).
@@ -214,8 +221,14 @@ class ClickHouseClient:
         return self._insert("logs", rows, LOGS_COLUMNS, json_columns=set())
 
     def insert_anomalies(self, rows: list[dict[str, Any]]) -> int:
-        """Batched insert into ``omniwatch.anomalies``; returns inserted row count."""
-        return self._insert("anomalies", rows, ANOMALIES_COLUMNS, json_columns=set())
+        """Batched insert into ``omniwatch.anomalies``; returns inserted row count.
+
+        ``evidence_logs`` list values are serialized to JSON strings to match
+        the schema's String column.
+        """
+        return self._insert(
+            "anomalies", rows, ANOMALIES_COLUMNS, json_columns=ANOMALIES_JSON_COLUMNS
+        )
 
     def insert_incidents(self, rows: list[dict[str, Any]]) -> int:
         """Batched insert into ``omniwatch.incidents``; returns inserted row count.
@@ -313,6 +326,53 @@ class ClickHouseClient:
         )
         params: dict[str, Any] = {"entity_id": entity_id, "limit": limit}
         return self._with_retry(lambda: self._query(sql, params))
+
+    def select_metrics_baseline(
+        self,
+        entity_id: str,
+        start: datetime,
+        end: datetime,
+        metric_name: str,
+    ) -> dict[str, Any]:
+        """Return aggregated baseline stats for a metric over a time range.
+
+        Queries ``omniwatch.metrics`` and computes avg, stddev (sample),
+        95th-percentile, and row count for the given entity, metric, and
+        time window.
+
+        Returns ``{"avg": float, "stddev": float, "p95": float, "count": int}``.
+        When no rows match, all values default to 0.
+        """
+        if not metric_name or not metric_name.replace("_", "").replace(".", "").isalnum():
+            raise ValueError(f"invalid metric_name: {metric_name!r}")
+        sql = (
+            "SELECT "
+            "  avg(value) AS avg, "
+            "  stddevSamp(value) AS stddev, "
+            "  quantile(0.95)(value) AS p95, "
+            "  count(*) AS cnt "
+            "FROM omniwatch.metrics "
+            "WHERE entity_id = %(entity_id)s "
+            "  AND metric_name = %(metric_name)s "
+            "  AND timestamp >= %(start)s "
+            "  AND timestamp <= %(end)s"
+        )
+        params: dict[str, Any] = {
+            "entity_id": entity_id,
+            "metric_name": metric_name,
+            "start": start,
+            "end": end,
+        }
+        rows = self._with_retry(lambda: self._query(sql, params))
+        if not rows:
+            return {"avg": 0.0, "stddev": 0.0, "p95": 0.0, "count": 0}
+        row = rows[0]
+        return {
+            "avg": float(row.get("avg") or 0.0),
+            "stddev": float(row.get("stddev") or 0.0),
+            "p95": float(row.get("p95") or 0.0),
+            "count": int(row.get("cnt") or 0),
+        }
 
     def _query(self, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         client = self.get_client()
