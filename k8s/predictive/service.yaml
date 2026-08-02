@@ -1,0 +1,19 @@
+# OmniWatch — Phase 6 Predictive Intelligence
+# Component: predictive Service (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: predictive
+  namespace: omniwatch
+  labels:
+    app: predictive
+    tier: backend
+    phase: "6"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8007
+      targetPort: 8007
+      name: http
+  selector:
+    app: predictive

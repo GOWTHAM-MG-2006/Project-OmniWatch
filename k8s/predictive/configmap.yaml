@@ -1,0 +1,33 @@
+# OmniWatch — Phase 6 Predictive Intelligence
+# Component: predictive-config ConfigMap (env vars for anomaly detection + security classifier)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: predictive-config
+  namespace: omniwatch
+  labels:
+    app: predictive
+    tier: backend
+    phase: "6"
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DB: omniwatch
+  CLICKHOUSE_USER: default
+  CLICKHOUSE_PASSWORD: ""
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_USER: neo4j
+  NEO4J_PASSWORD: omniwatch
+  MINIO_ENDPOINT: minio:9010
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_SECURE: "false"
+  MINIO_CONSOLE_PORT: "9001"
+  PREDICTIVE_ANOMALY_SCORE_THRESHOLD: "0.7"
+  PREDICTIVE_CONFIDENCE_THRESHOLD: "60.0"
+  PREDICTIVE_COLD_START_SAMPLE_COUNT: "30"
+  PREDICTIVE_NOISE_FILTER_WINDOW: "5"
+  PREDICTIVE_SEASONALITY_PERIOD: "24"
+  PREDICTIVE_LOOKBACK_WINDOW: "168"
+  PREDICTIVE_SECURITY_ENABLED: "true"
