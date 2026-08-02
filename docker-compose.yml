@@ -401,3 +401,51 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Predictive Intelligence — Phase 6 (anomaly detection + security classifier)
+  # ---------------------------------------------------------------------------
+  predictive:
+    build:
+      context: .
+      dockerfile: predictive/Dockerfile
+    container_name: omniwatch-predictive
+    networks:
+      - omniwatch-network
+    ports:
+      - "8007:8007"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: omniwatch
+      MINIO_ENDPOINT: minio:9010
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      MINIO_CONSOLE_PORT: 9001
+      PREDICTIVE_ANOMALY_SCORE_THRESHOLD: 0.7
+      PREDICTIVE_CONFIDENCE_THRESHOLD: 60.0
+      PREDICTIVE_COLD_START_SAMPLE_COUNT: 30
+      PREDICTIVE_NOISE_FILTER_WINDOW: 5
+      PREDICTIVE_SEASONALITY_PERIOD: 24
+      PREDICTIVE_LOOKBACK_WINDOW: 168
+      PREDICTIVE_SECURITY_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
