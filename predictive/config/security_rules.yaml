@@ -1,0 +1,29 @@
+# OmniWatch — Predictive Intelligence Layer
+# Component: Security Rules Configuration
+# Phase: 6
+# Purpose: Detection rule configs for the security signal classifier (GAP 1)
+# Inputs: omniwatch.security.events Kafka topic
+# Outputs: SecurityAnomalySignal detection thresholds and severities
+
+attack_types:
+  brute_force:
+    failures_threshold: 10
+    window_minutes: 5
+    severity: HIGH
+    description: ">=10 failed auth attempts in 5 minutes"
+
+  config_drift:
+    trigger: "unauthorized_config_change"
+    severity: HIGH
+    description: "Unauthorized configuration change detected"
+
+  priv_escalation:
+    patterns: ["sudo", "su", "escalat", "role_change"]
+    severity: CRITICAL
+    confidence: 90
+    description: "Privilege escalation attempt via sudo/su/escalation/role_change"
+
+  data_exfil:
+    outbound_ratio: 3.0
+    severity: CRITICAL
+    description: "Outbound traffic >3x average"

@@ -1,0 +1,14 @@
+metrics:
+  latency_p99:
+    zscore_threshold: 3.0
+    description: "P99 latency exceeding 3 sigma"
+  error_rate:
+    absolute_threshold: 0.05
+    description: "Error rate above 5%"
+  request_volume:
+    baseline_ratio: 0.5
+    description: "Request volume below 50% of baseline"
+demo_scenarios:
+  database_cascade:
+    min_anomaly_score: 0.85
+    description: "Database cascade scenario requires high confidence"

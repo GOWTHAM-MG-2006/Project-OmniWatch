@@ -1,0 +1,51 @@
+# =============================================================================
+# OmniWatch — Predictive Intelligence Layer (Phase 6)
+# =============================================================================
+#
+# ⚠️  KAFKA-PYTHON-NAMESPACE WARNING (M1) ⚠️
+# ---------------------------------------------------------------
+# This layer uses `kafka-python-ng` (NOT legacy `kafka-python`).
+# Both packages provide the top-level `kafka` namespace:
+#   from kafka import KafkaProducer   # works with kafka-python-ng
+#   from kafka import KafkaConsumer   # works with kafka-python-ng
+#
+# Installing BOTH `kafka-python` and `kafka-python-ng` side-by-side
+# WILL cause namespace collisions and import failures.  The legacy
+# `kafka-python` package is abandoned (last release 2020) and does
+# NOT support Python 3.14.  `kafka-python-ng` is the maintained fork
+# with cp314 wheels.
+#
+# TL;DR — install kafka-python-ng ONLY.  Never install kafka-python.
+# ---------------------------------------------------------------
+#
+# Plan B (Merlion LOCKED OUT):  salesforce-merlion is NOT listed here.
+# Merlion hard-pins numpy<2.0 → no cp314 wheel → install fails.
+# Detection uses sklearn IsolationForest + scipy Z-Score + statsmodels
+# seasonal naive instead (identical algorithmic purpose).
+# =============================================================================
+
+# -- ML / Statistics -----------------------------------------------------------
+scikit-learn>=1.5.0             # IsolationForest, StandardScaler (anomaly_detector.py)
+scipy>=1.13.0                   # Z-Score statistical detection (anomaly_detector.py)
+statsmodels>=0.14.0             # Seasonal naive baseline (planned seasonal component)
+numpy>=1.26.0                   # Numerical arrays (directly imported in anomaly_detector.py)
+joblib>=1.3.0                   # Model persistence (directly imported in anomaly_detector.py)
+pandas>=2.1.0                   # DataFrame ops in detector_engine.py cold-start training
+
+# -- Kafka --------------------------------------------------------------------
+kafka-python-ng>=2.0.0          # KafkaProducer / KafkaConsumer (provides `kafka` namespace)
+confluent-kafka>=2.3.0          # Alternative Kafka client (used by ingestion layer integration)
+# DO NOT ADD: kafka-python       # Legacy, abandoned, namespace collision with kafka-python-ng
+
+# -- Storage clients -----------------------------------------------------------
+clickhouse-connect>=0.7.0       # ClickHouse HTTP client (used by storage layer)
+neo4j>=5.17.0                   # Neo4j Bolt driver (signal_enricher.py via storage layer)
+
+# -- API framework -------------------------------------------------------------
+fastapi>=0.109.0                # Health endpoint (predictive/main.py)
+uvicorn>=0.27.0                 # ASGI server (predictive/main.py __main__)
+
+# -- Configuration / validation ------------------------------------------------
+pydantic>=2.5.0                 # Data validation (config/settings.py Field)
+pydantic-settings>=2.1.0        # Env-var loading (config/settings.py BaseSettings)
+pyyaml>=6.0                     # YAML config loading (anomaly_detector.py, security/*.py)
