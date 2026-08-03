@@ -1,0 +1,73 @@
+# OmniWatch — Causal Graph Engine
+# Component: Causal Discovery Configuration
+# Phase: 7
+# Purpose: Tunables for PyRCA causal discovery, temporal causal model,
+#          backward-BFS traversal, and demo scenario overrides.
+# Inputs: none (static config, loaded by causal_engine.py)
+# Outputs: config consumed by py_rca_adapter.py, temporal_causal_model.py,
+#          dag_traversal.py
+
+# ---------------------------------------------------------------------------
+# PyRCA PC algorithm settings (Layer-2 causal graph discovery)
+# ---------------------------------------------------------------------------
+pc_algorithm:
+  alpha: 0.05                 # significance level for conditional independence tests
+  run_pdag2dag: true          # orient PDAG into a DAG after skeleton discovery
+  max_num_points: 100000      # cap rows fed to PC (memory guard)
+  domain_knowledge_file: null # optional path to YAML (causal-graph: root-nodes/...)
+  use_bayesian: false         # experimental BayesianNetwork scorer (off by default)
+
+# ---------------------------------------------------------------------------
+# RandomWalk root cause scorer (applied on top of the causal DAG)
+# ---------------------------------------------------------------------------
+random_walk:
+  rho: 0.1                    # strength of edges between successive levels
+  num_steps: 10               # walk steps per root candidate
+  num_repeats: 1000           # random walk repeats (score stability)
+  root_cause_top_k: 5         # max root causes returned
+  random_seed: 42             # deterministic scoring (reproducible E2E)
+
+# ---------------------------------------------------------------------------
+# Temporal causal model (lag-aware causality for correlated time series)
+# ---------------------------------------------------------------------------
+temporal_causal_model:
+  min_lag: 1                  # minimum lag (minutes) to test
+  max_lag: 15                 # maximum lag (minutes) to test
+  correlation_threshold: 0.5  # |lagged corr| above this => candidate causal edge
+  p_value_threshold: 0.05     # significance for Granger-style lag test
+
+# ---------------------------------------------------------------------------
+# Backward BFS traversal (Layer-1 Neo4j dependency graph fallback + scoring)
+# ---------------------------------------------------------------------------
+dag_traversal:
+  max_depth: 10               # cap BFS depth from symptom toward root
+  min_confidence: 0.3         # below this, candidate is excluded from result
+  path_order: "root_to_symptom"  # fault_path output order
+
+# ---------------------------------------------------------------------------
+# Cross-cloud dependency mapping
+# ---------------------------------------------------------------------------
+cross_cloud_mapper:
+  default_provider: "gcp"
+  canonical_id_template: "{provider}:{region}:{entity_type}:{name}"
+
+# ---------------------------------------------------------------------------
+# Demo scenario overrides (match simulation/anomaly_injector.py scenarios)
+# ---------------------------------------------------------------------------
+demo_scenarios:
+  database_cascade:
+    expected_root_cause: "postgresql-database"
+    min_confidence: 0.6
+    description: "PostgreSQL failure cascading to dependent services"
+  memory_leak:
+    expected_root_cause: "background-worker"
+    min_confidence: 0.5
+    description: "Background worker memory exhaustion"
+  security_attack:
+    expected_root_cause: "checkoutservice"
+    min_confidence: 0.4
+    description: "Security attack propagating via service dependencies"
+  config_drift:
+    expected_root_cause: "config-service"
+    min_confidence: 0.4
+    description: "Unauthorized config change affecting downstream services"

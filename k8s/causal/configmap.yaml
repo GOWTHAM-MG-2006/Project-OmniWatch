@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: causal-config
+  namespace: omniwatch
+  labels:
+    app: causal
+    tier: backend
+    phase: "7"
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_GROUP_ID: omniwatch-causal-group
+  KAFKA_AUTO_OFFSET_RESET: earliest
+  CAUSAL_MAX_DEPTH: "10"
+  CAUSAL_MIN_CONFIDENCE: "0.3"

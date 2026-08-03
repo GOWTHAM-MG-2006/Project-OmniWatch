@@ -1,0 +1,36 @@
+# OmniWatch — Causal Graph Engine
+# Component: Causal Service Dependencies
+# Phase: 7
+# Purpose: Installable dependency list for the causal engine.
+#          Runs on python:3.10-slim (PyRCA requires scikit-learn < 1.2,
+#          which ships no cp314 wheels). javabridge is deliberately EXCLUDED:
+#          PC / RandomWalk / BayesianNetwork do not import it.
+#          pingouin is optional (only for use_partial_corr=True) — excluded.
+
+# --- PyRCA (Salesforce root cause analysis library) -------------------------
+sfr-pyrca==1.0.1              # NEVER `pip install pyrca` (squatted PyPI name)
+
+# --- PyRCA runtime dependencies (validated recipe, python 3.10) -------------
+numpy==1.23.5
+pandas>=1.1.0
+scikit-learn>=0.24,<1.2       # hard upper pin from PyRCA METADATA
+networkx>=2.6
+matplotlib
+pyyaml
+schema
+pyparsing
+dill
+tqdm
+wheel
+packaging
+
+# --- Service runtime ---------------------------------------------------------
+fastapi
+uvicorn
+pydantic>=2.0
+pydantic-settings>=2.1.0     # env-var loading (config/settings.py BaseSettings)
+kafka-python-ng               # provides top-level `kafka` namespace
+clickhouse-driver
+neo4j
+minio
+requests

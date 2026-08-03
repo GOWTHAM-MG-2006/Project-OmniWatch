@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: causal
+  namespace: omniwatch
+  labels:
+    app: causal
+    tier: backend
+    phase: "7"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8008
+      targetPort: 8008
+      name: http
+  selector:
+    app: causal
