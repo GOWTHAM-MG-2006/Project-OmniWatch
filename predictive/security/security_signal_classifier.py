@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -48,7 +49,9 @@ class SecuritySignalClassifier:
 
     def __init__(
         self,
-        bootstrap_servers: str = "localhost:9092",
+        bootstrap_servers: str = os.environ.get(
+            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+        ),
         *,
         topic_in: str = TOPIC_SECURITY_EVENTS,
         topic_out: str = TOPIC_ANOMALIES_DETECTED,

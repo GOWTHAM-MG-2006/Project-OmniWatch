@@ -28,7 +28,17 @@
             "worktree_path": null,
             "status": "completed",
             "plan_name": "phase-6-predictive-intelligence"
+        },
+        "phase-6-predictive-redesign": {
+            "session_ids": [
+                "opencode:ses_058371b1affeMpdnSsxxHMGx2K"
+            ],
+            "active_plan": "E:\\Project-OmniWatch\\.omo\\plans\\phase-6-predictive-redesign.md",
+            "work_id": "phase-6-predictive-redesign",
+            "worktree_path": null,
+            "status": "active",
+            "plan_name": "phase-6-predictive-redesign"
         }
     },
-    "active_work_id": null
+    "active_work_id": "phase-6-predictive-redesign"
 }

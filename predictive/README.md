@@ -14,12 +14,19 @@ publishes confirmed anomalies to Kafka and ClickHouse for downstream processing
 
 | Component | Purpose |
 |-----------|---------|
-| AnomalyDetector | IsolationForest + Z-Score + Seasonal Naive detection |
+| AnomalyDetector | IsolationForest + Z-Score + Seasonal Naive detection, CUSUM/ADWIN drift-driven retrain loop |
 | AdaptiveThresholder | Welford's online algorithm for per-entity baselines |
 | NoiseFilter | Transient spike suppression with cascade awareness |
 | SignalEnricher | Neo4j entity context enrichment |
 | FeatureReader | ClickHouse feature_vectors reader |
-| DetectorEngine | Full pipeline orchestrator (detect -> threshold -> filter -> enrich -> publish) |
+| DetectorEngine | Full pipeline orchestrator (detect -> fusion -> threshold -> filter -> enrich -> publish) |
+| BayesianFusionEngine | Platt-scaled LogisticRegression fusion of per-detector scores into one calibrated probability |
+| ColdStartAwareFusion | Cold-start confidence wrapper around BayesianFusionEngine (`confidence = min(1, n_samples/100)`) |
+| CUSUMDetector | Two-sided CUSUM for slow-drift detection against Z-Score baselines |
+| ADWINDriftDetector | Bucket-based ADWIN concept-drift detector triggering model retrain |
+| RobustSeasonalDetector | Auto-period seasonal decomposition robust to irregular timestamps and outliers |
+| AnomalySessionTracker | Anomaly duration tracking with 3-consecutive-normal resolution rule |
+| K8sEventIntegration | K8s scale/restart event integration — baseline adjustment during cooldown |
 | SecuritySignalClassifier | GAP 1: brute force, config drift, privilege escalation, data exfiltration |
 | AnomalyProducer | Kafka + ClickHouse dual output with circuit-breaker |
 | FastAPI Health | `/health` endpoint on port 8007 |
@@ -101,6 +108,7 @@ environment or `.env` file at repo root.
 | `PREDICTIVE_COLD_START_SAMPLE_COUNT` | `30` | Samples before baseline activates |
 | `PREDICTIVE_SEASONALITY_PERIOD` | `24` | Seasonality period in data-point units |
 | `PREDICTIVE_SECURITY_ENABLED` | `true` | Enable security signal classifier |
+| `K8S_NAMESPACE` | `default` | Kubernetes namespace for K8s event integration |
 
 ## Service Endpoints
 
@@ -124,13 +132,18 @@ python -m pytest tests/phase-6-e2e/ -v
 ```
 predictive/
   main.py                      # FastAPI health server (port 8007)
-  anomaly_detector.py           # IsolationForest + Z-Score + Seasonal Naive
+  anomaly_detector.py           # IsolationForest + Z-Score + Seasonal Naive + drift retrain
   adaptive_thresholder.py       # Welford's online baselines
   noise_filter.py               # Transient spike suppression
   signal_enricher.py            # Neo4j entity context
   feature_reader.py             # ClickHouse feature_vectors reader
   anomaly_producer.py           # Kafka + ClickHouse output
   detector_engine.py            # Pipeline orchestrator
+  fusion.py                     # Bayesian fusion + cold-start confidence
+  drift.py                      # CUSUM + ADWIN drift detectors
+  seasonal.py                   # Robust seasonal decomposition
+  session_tracker.py            # Anomaly duration + resolution tracking
+  k8s_integration.py            # K8s event baseline adjustment
   config/
     settings.py                 # Pydantic Settings
     detection_rules.yaml        # Per-metric thresholds
@@ -142,6 +155,8 @@ predictive/
     priv_escalation_detector.py    # sudo/su/escalat/role_change
     data_exfil_detector.py         # Outbound traffic spikes
     evidence_aggregator.py         # Ring buffer evidence logs
+  tests/
+    test_flag_combinations.py      # 8 flag permutations through process_message()
   Dockerfile
   requirements.txt
 ```

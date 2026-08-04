@@ -29,8 +29,11 @@ _fake_kafka.KafkaProducer = MagicMock  # type: ignore[attr-defined]
 _fake_kafka.KafkaConsumer = MagicMock  # type: ignore[attr-defined]
 sys.modules.setdefault("kafka", _fake_kafka)
 
+from predictive.anomaly_detector import AnomalyDetector
 from predictive.config.settings import Settings
 from predictive.detector_engine import DetectorEngine
+from predictive.fusion import BayesianFusionEngine, ColdStartAwareFusion
+from predictive.session_tracker import AnomalySessionTracker
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +163,32 @@ class _FakeProducer:
 
     def close(self) -> None:
         self.close_called = True
+
+
+class _StatefulDetector:
+    """Returns an anomaly signal for the first ``anomaly_calls`` detect()
+    calls, then ``None`` — used to exercise the session-resolution path."""
+
+    def __init__(
+        self,
+        return_signal: Optional[Dict[str, Any]] = None,
+        anomaly_calls: int = 1,
+    ) -> None:
+        self._return_signal = return_signal
+        self._anomaly_calls = anomaly_calls
+        self._calls = 0
+        self.detect_calls: list = []
+        self.train_calls: list = []
+
+    def detect(self, feature: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        self.detect_calls.append(feature)
+        self._calls += 1
+        if self._calls <= self._anomaly_calls:
+            return self._return_signal
+        return None
+
+    def train(self, df: Any) -> None:
+        self.train_calls.append(df)
 
 
 # ---------------------------------------------------------------------------
@@ -631,3 +660,201 @@ class TestThresholderUpdate:
         assert entity == "order-service"
         assert metric == "error_rate"
         assert value == 0.05
+
+
+# ---------------------------------------------------------------------------
+# Tests — fusion + session tracker wiring (Task T7)
+# ---------------------------------------------------------------------------
+
+
+class TestFusionAndSessionWiring:
+    """Bayesian fusion + cold-start + session tracker wired into process_message."""
+
+    def test_baseline_pipeline_order_preserved(self) -> None:
+        """Characterize the pipeline order — unchanged by the T7 wiring.
+
+        detect → fusion → adaptive threshold → noise filter → enrich → publish.
+        """
+        signal = _sample_signal(
+            anomaly_score=0.85,
+            detector_contributions={
+                "z_score": 0.9,
+                "seasonal_naive": 0.8,
+                "isolation_forest": 0.7,
+            },
+        )
+        detector = _FakeDetector(return_signal=signal)
+        noise_filter = _FakeNoiseFilter(suppress=False)
+        enricher = _FakeEnricher()
+        producer = _FakeProducer()
+
+        engine = DetectorEngine(
+            settings=_make_settings(),
+            detector=detector,
+            thresholder=_FakeThresholder(),
+            noise_filter=noise_filter,
+            enricher=enricher,
+            producer=producer,
+        )
+        engine._is_trained = True
+
+        result = engine.process_message(_sample_feature())
+
+        assert len(detector.detect_calls) == 1
+        assert len(noise_filter.suppress_calls) == 1
+        assert len(enricher.enrich_calls) == 1
+        assert len(producer.publish_calls) == 1
+        assert result is not None
+        assert result["enriched"] is True
+
+    def test_fusion_and_session_wiring(self) -> None:
+        """Fusion recalibrates the score; session tracker populates provenance."""
+        signal = _sample_signal(
+            anomaly_score=0.85,
+            detector_contributions={
+                "z_score": 0.9,
+                "seasonal_naive": 0.8,
+                "isolation_forest": 0.7,
+            },
+        )
+        detector = _FakeDetector(return_signal=signal)
+        producer = _FakeProducer()
+
+        engine = DetectorEngine(
+            settings=_make_settings(),
+            detector=detector,
+            thresholder=_FakeThresholder(),
+            noise_filter=_FakeNoiseFilter(),
+            enricher=_FakeEnricher(),
+            producer=producer,
+        )
+        engine._is_trained = True
+
+        result = engine.process_message(_sample_feature())
+
+        # The published anomaly_score is the fused calibrated probability,
+        # not the raw composite score (0.85) the detector returned.
+        assert result["anomaly_score"] != 0.85
+        assert 0.0 <= result["anomaly_score"] <= 1.0
+        # Session tracker populates provenance fields.
+        assert result.get("entity_anomaly_count", 0) >= 1
+        assert result.get("resolution_status") == "active"
+
+    def test_session_resolution_flow(self) -> None:
+        """An active session resolves after 3 consecutive normal observations."""
+        signal = _sample_signal(anomaly_score=0.85, metric_name="latency_p99")
+        detector = _StatefulDetector(signal, anomaly_calls=1)
+        producer = _FakeProducer()
+
+        engine = DetectorEngine(
+            settings=_make_settings(),
+            detector=detector,
+            thresholder=_FakeThresholder(),
+            noise_filter=_FakeNoiseFilter(),
+            enricher=_FakeEnricher(),
+            producer=producer,
+        )
+        engine._is_trained = True
+
+        # Anomaly observation → session starts.
+        engine.process_message(_sample_feature())
+        assert (
+            engine._session_tracker.get_session("order-service", "latency_p99")
+            is not None
+        )
+
+        # 3 normal observations → session resolves.
+        for _ in range(3):
+            engine.process_message(_sample_feature())
+
+        resolved = engine._session_tracker.get_resolved_sessions()
+        assert len(resolved) == 1
+        assert resolved[0].resolution_status == "resolved"
+
+
+# ---------------------------------------------------------------------------
+# Tests — integration pipeline with real components (Task T11)
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationPipeline:
+    """Full process_message() pipeline with REAL AnomalyDetector + fusion +
+    session tracker (infra-free: thresholder / noise / enricher / producer
+    are fakes because they need Kafka / Neo4j / ClickHouse)."""
+
+    _DETECTOR_ORDER = ["z_score", "seasonal_naive", "isolation_forest"]
+
+    def _build_engine(self, cold_start: int = 60):
+        settings = _make_settings(predictive_cold_start_sample_count=cold_start)
+        detector = AnomalyDetector(settings)
+        fusion = ColdStartAwareFusion(
+            BayesianFusionEngine(detector_order=self._DETECTOR_ORDER)
+        )
+        # Fit the Platt calibration on two labelled samples so fusion is real.
+        fusion.fit(
+            [
+                (
+                    {"z_score": 0.1, "seasonal_naive": 0.1, "isolation_forest": 0.1},
+                    0,
+                ),
+                (
+                    {"z_score": 0.9, "seasonal_naive": 0.9, "isolation_forest": 0.9},
+                    1,
+                ),
+            ]
+        )
+        producer = _FakeProducer()
+        engine = DetectorEngine(
+            settings=settings,
+            detector=detector,
+            thresholder=_FakeThresholder(),
+            noise_filter=_FakeNoiseFilter(),
+            enricher=_FakeEnricher(),
+            producer=producer,
+            fusion=fusion,
+            session_tracker=AnomalySessionTracker(),
+        )
+        return engine, detector, producer
+
+    def test_real_detector_fusion_session_pipeline(self) -> None:
+        """Train a real detector, then an anomalous observation flows through
+        the full pipeline and is published with provenance + session fields."""
+        engine, detector, producer = self._build_engine()
+
+        # Feed cold-start samples to train the real detector.
+        for i in range(60):
+            engine.process_message(_sample_feature(request_volume=1000.0 + i))
+        assert engine._is_trained is True
+
+        # A large spike in every metric is a clear anomaly (a single-metric
+        # spike gets diluted below the 0.7 composite threshold by the constant
+        # training columns, so all three must deviate together).
+        result = engine.process_message(
+            _sample_feature(latency_p99=5000.0, error_rate=10.0, request_volume=5000.0)
+        )
+
+        assert result is not None
+        assert 0.0 <= result["anomaly_score"] <= 1.0
+        assert result["entity_id"] == "order-service"
+        assert result["enriched"] is True
+        # Real detector provenance + session tracking populated.
+        assert result.get("detector_name") == "AnomalyDetector"
+        assert result.get("entity_anomaly_count", 0) >= 1
+        assert result.get("resolution_status") == "active"
+        assert len(producer.publish_calls) == 1
+        assert producer.publish_calls[0] is result
+
+    def test_real_pipeline_normal_observation_no_anomaly(self) -> None:
+        """A normal observation after training produces no anomaly and is not
+        published."""
+        engine, detector, producer = self._build_engine()
+
+        for i in range(60):
+            engine.process_message(_sample_feature(request_volume=1000.0 + i))
+        assert engine._is_trained is True
+
+        # A value inside the trained baseline is normal.
+        result = engine.process_message(_sample_feature(latency_p99=1030.0))
+
+        assert result is None
+        assert len(producer.publish_calls) == 0

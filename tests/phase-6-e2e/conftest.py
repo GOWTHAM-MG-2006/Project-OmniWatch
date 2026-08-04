@@ -260,6 +260,22 @@ def engine(settings):
     eng._producer.publish.return_value = None
     eng._producer.close.return_value = None
 
+    # Real fusion (ColdStartAwareFusion wrapping a BayesianFusionEngine) —
+    # process_message() calls ``self._fusion.predict(...)`` and reads
+    # ``self._fusion.confidence`` when a signal carries detector_contributions.
+    from predictive.detector_engine import _DETECTOR_ORDER
+    from predictive.fusion import BayesianFusionEngine, ColdStartAwareFusion
+
+    eng._fusion = ColdStartAwareFusion(
+        BayesianFusionEngine(detector_order=_DETECTOR_ORDER)
+    )
+
+    # Real session tracker — process_message() calls start()/get_session()/
+    # check_resolution() to track anomaly duration and resolution.
+    from predictive.session_tracker import AnomalySessionTracker
+
+    eng._session_tracker = AnomalySessionTracker()
+
     return eng
 
 

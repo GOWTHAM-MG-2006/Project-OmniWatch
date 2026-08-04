@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -21,10 +22,25 @@ from .adaptive_thresholder import AdaptiveThresholder
 from .anomaly_detector import AnomalyDetector
 from .anomaly_producer import AnomalyProducer
 from .config.settings import Settings
+from .fusion import BayesianFusionEngine, ColdStartAwareFusion
 from .noise_filter import NoiseFilter
+from .session_tracker import AnomalySessionTracker
 from .signal_enricher import SignalEnricher
 
 logger = logging.getLogger("omniwatch.predictive.detector_engine")
+
+#: Detector names for the fusion feature vector. Must match the keys emitted by
+#: ``AnomalyDetector.detect()`` under ``detector_contributions``.
+_DETECTOR_ORDER = ["z_score", "seasonal_naive", "isolation_forest"]
+
+#: Feature-vector keys that are metadata, never scoring metrics.
+_METADATA_KEYS = {
+    "entity_id",
+    "trend_direction",
+    "affected_neighbors",
+    "timestamp",
+    "source_type",
+}
 
 
 class DetectorEngine:
@@ -65,6 +81,8 @@ class DetectorEngine:
         noise_filter: Optional[NoiseFilter] = None,
         enricher: Optional[SignalEnricher] = None,
         producer: Optional[AnomalyProducer] = None,
+        fusion: Optional[ColdStartAwareFusion] = None,
+        session_tracker: Optional[AnomalySessionTracker] = None,
     ) -> None:
         """Wire together the detection pipeline.
 
@@ -82,6 +100,11 @@ class DetectorEngine:
             Injected for testability.  ``None`` → constructed.
         producer : AnomalyProducer | None
             Injected for testability.  ``None`` → constructed from *settings*.
+        fusion : ColdStartAwareFusion | None
+            Injected for testability.  ``None`` → a cold-start-aware wrapper
+            around a fresh :class:`BayesianFusionEngine`.
+        session_tracker : AnomalySessionTracker | None
+            Injected for testability.  ``None`` → constructed.
         """
         self._settings = settings or Settings.from_env()
         self._detector = detector or AnomalyDetector(self._settings)
@@ -89,6 +112,10 @@ class DetectorEngine:
         self._noise_filter = noise_filter or NoiseFilter()
         self._enricher = enricher or SignalEnricher()
         self._producer = producer or AnomalyProducer(self._settings)
+        self._fusion = fusion or ColdStartAwareFusion(
+            BayesianFusionEngine(detector_order=_DETECTOR_ORDER)
+        )
+        self._session_tracker = session_tracker or AnomalySessionTracker()
 
         # Cold-start bookkeeping
         self._cold_start_count = self._settings.predictive_cold_start_sample_count
@@ -164,7 +191,21 @@ class DetectorEngine:
             signal = self._detector.detect(message)
 
         if signal is None:
+            # No anomaly — feed the session tracker so an active session can
+            # resolve after a run of consecutive normal observations.
+            self._track_resolution(entity_id, message)
             return None
+
+        # ── Fusion ───────────────────────────────────────────────────── #
+        # Combine the per-detector anomaly scores into one calibrated
+        # probability via the cold-start-aware Bayesian fusion engine.  When
+        # the detector emits no per-detector contributions (e.g. a fake in
+        # tests), the raw composite score is left unchanged.
+        detector_contributions = signal.get("detector_contributions") or {}
+        if detector_contributions:
+            fused_score = self._fusion.predict(detector_contributions)
+            signal["anomaly_score"] = round(fused_score, 4)
+            signal["fusion_confidence"] = round(self._fusion.confidence, 4)
 
         # ── Adaptive threshold gate ──────────────────────────────────── #
         metric_name = signal.get("metric_name", "")
@@ -215,6 +256,19 @@ class DetectorEngine:
             )
             return None
 
+        # ── Session tracking (anomaly) ───────────────────────────────── #
+        # Record the confirmed anomaly in the session tracker so duration /
+        # peak / per-entity counts are tracked for downstream consumers.
+        with self._model_lock:
+            session = self._session_tracker.start(
+                entity_id,
+                metric_name,
+                signal.get("anomaly_score", 0.0),
+                signal.get("timestamp", ""),
+            )
+        signal["entity_anomaly_count"] = len(session.score_history)
+        signal["resolution_status"] = session.resolution_status
+
         # ── Enrich ───────────────────────────────────────────────────── #
         enriched_signal = self._enricher.enrich(signal)
 
@@ -229,6 +283,33 @@ class DetectorEngine:
         )
 
         return enriched_signal
+
+    def _track_resolution(self, entity_id: str, message: dict) -> None:
+        """Feed a normal observation to the session tracker.
+
+        Called when ``detect()`` returns ``None`` (no anomaly).  Records the
+        observation on the active session for the entity's primary metric so
+        the 3-consecutive-normal rule can resolve it.  No-op when no session
+        is active for that key.
+        """
+        metric_name = self._primary_metric(message)
+        with self._model_lock:
+            if self._session_tracker.get_session(entity_id, metric_name) is None:
+                return
+            ts = message.get("timestamp") or datetime.now(timezone.utc).isoformat()
+            self._session_tracker.check_resolution(entity_id, metric_name, 0.0, ts)
+
+    def _primary_metric(self, message: dict) -> str:
+        """Return the first numeric, non-metadata key in a feature vector."""
+        for key in message:
+            if key in _METADATA_KEYS:
+                continue
+            try:
+                float(message[key])
+                return key
+            except (TypeError, ValueError):
+                continue
+        return "unknown"
 
     def run(self, consumer=None) -> None:
         """Main consume-loop entry point (long-running).
