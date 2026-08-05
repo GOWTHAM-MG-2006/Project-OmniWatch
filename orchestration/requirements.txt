@@ -1,0 +1,29 @@
+# =============================================================================
+# OmniWatch — Orchestration + Policy Layer (Phase 9)
+# =============================================================================
+#
+# Runtime dependencies for the Orchestration Engine FastAPI service.
+# Mirrors pyproject.toml / sibling requirements.txt version constraints.
+# =============================================================================
+
+# -- API framework -------------------------------------------------------------
+fastapi>=0.100                         # FastAPI app (orchestration_engine, approval_api)
+uvicorn[standard]>=0.23                # ASGI server (orchestration_engine CLI)
+
+# -- Kafka (via ingestion.kafka_bus) -------------------------------------------
+confluent-kafka>=2.3.0                 # KafkaProducer / KafkaConsumer (confluent_kafka)
+
+# -- Configuration / validation ------------------------------------------------
+pydantic>=2.0                          # Data validation (models.py, approval_api.py)
+pydantic-settings>=2.1.0               # Env-var loading (config/settings.py)
+
+# -- HTTP client (OPA + simulation executor) -----------------------------------
+httpx>=0.24                            # Sync HTTP client (decision_client.py, executor.py)
+
+# -- Storage clients (transitive via storage/) ---------------------------------
+clickhouse-connect>=0.0.14             # ClickHouse HTTP client (storage layer)
+
+# -- Observability (OpenTelemetry) ---------------------------------------------
+opentelemetry-sdk>=1.20.0              # OTel SDK (telemetry export)
+opentelemetry-api>=1.20.0              # OTel API (instrumentation)
+opentelemetry-exporter-otlp>=1.20.0    # OTLP gRPC/HTTP exporter

@@ -1,0 +1,6 @@
+{
+  "config": {
+    "confidence_threshold": 95,
+    "safe_actions": ["restart_service", "scale_deployment", "clear_cache", "kill_pod", "rollback"]
+  }
+}

@@ -75,6 +75,16 @@ INCIDENTS_COLUMNS: list[str] = [
     "assigned_to",
     "created_at",
 ]
+PENDING_APPROVALS_COLUMNS: list[str] = [
+    "approval_id",
+    "incident_id",
+    "action_type",
+    "entity_id",
+    "proposed_by",
+    "status",
+    "created_at",
+    "decided_at",
+]
 
 # List-valued columns stored as JSON strings (schema.sql stores serialized arrays).
 INCIDENTS_JSON_COLUMNS: set[str] = {"fault_path", "impacted_services"}
@@ -84,7 +94,7 @@ ANOMALIES_JSON_COLUMNS: set[str] = {"evidence_logs"}
 MAP_COLUMNS: set[str] = {"tags"}
 
 # DateTime columns — parse ISO-8601 string values to datetime (client requires datetime).
-TIMESTAMP_COLUMNS: set[str] = {"timestamp", "created_at"}
+TIMESTAMP_COLUMNS: set[str] = {"timestamp", "created_at", "decided_at"}
 
 # Tables reachable via select_by_entity (whitelist guards SQL interpolation).
 SELECT_TABLES: set[str] = {
@@ -240,6 +250,12 @@ class ClickHouseClient:
             "incidents", rows, INCIDENTS_COLUMNS, json_columns=INCIDENTS_JSON_COLUMNS
         )
 
+    def insert_pending_approvals(self, rows: list[dict[str, Any]]) -> int:
+        """Batched insert into ``omniwatch.pending_approvals``; returns inserted row count."""
+        return self._insert(
+            "pending_approvals", rows, PENDING_APPROVALS_COLUMNS, json_columns=set()
+        )
+
     def _insert(
         self,
         table: str,
@@ -392,3 +408,40 @@ class ClickHouseClient:
         if isinstance(value, (datetime, date)):
             return value.isoformat()
         return value
+
+
+# ------------------------------------------------------------------ #
+# Module-level convenience functions
+# ------------------------------------------------------------------ #
+
+
+def insert_pending_approvals(record: dict[str, Any]) -> int:
+    """Insert a single pending-approval record into ``omniwatch.pending_approvals``.
+
+    Module-level convenience — creates a temporary :class:`ClickHouseClient`,
+    delegates to the batched ``_insert`` path, and closes the client.  Returns
+    the inserted row count (always 1 on success).
+    """
+    logger = create_logger("omniwatch.storage.clickhouse")
+    client = ClickHouseClient()
+    try:
+        result = client._insert(
+            "pending_approvals",
+            [record],
+            PENDING_APPROVALS_COLUMNS,
+            json_columns=set(),
+        )
+        logger.info(
+            "inserted pending approval approval_id=%s",
+            record.get("approval_id"),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "failed to insert pending approval approval_id=%s error=%s",
+            record.get("approval_id"),
+            exc,
+        )
+        raise
+    finally:
+        client.close()
