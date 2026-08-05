@@ -1,0 +1,28 @@
+severity:
+  p1:
+    conditions:
+      - entity_type_contains: "DATABASE"
+      - confidence_gte: 85
+      - impacted_count_gte: 3
+  p2:
+    conditions_any:
+      - confidence_gte: 70
+      - anomaly_score_gte: 0.7
+  p3:
+    conditions_any:
+      - confidence_gte: 40
+      - anomaly_score_gte: 0.4
+  p4:
+    conditions: "else"
+sla_risk:
+  P1: "HIGH"
+  P2: "MEDIUM"
+  P3: "LOW"
+  P4: "LOW"
+assignment:
+  auto_remediation:
+    severity: "P1"
+    confidence_gte: 85
+  fallback: "oncall-engineer"
+notes:
+  confidence_scale: "Phase 7 emits 0..1; Phase 8 normalizes to 0..100 via normalize_confidence()"

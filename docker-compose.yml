@@ -449,3 +449,41 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Incident Prioritization Engine — Phase 8 (severity, dedup, assignment)
+  # ---------------------------------------------------------------------------
+  prioritization:
+    build:
+      context: .
+      dockerfile: prioritization/Dockerfile
+    container_name: omniwatch-prioritization
+    networks:
+      - omniwatch-network
+    ports:
+      - "8009:8009"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_GROUP_ID: omniwatch-prioritization-group
+      KAFKA_AUTO_OFFSET_RESET: earliest
+      DEDUP_TTL_SECONDS: 300
+      DEDUP_ENABLED: "true"
+      MINIO_ENDPOINT: minio:9010
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_INCIDENTS_BUCKET: omniwatch-incidents
+      MINIO_SECURE: "false"
+      PRIORITIZATION_API_PORT: 8009
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s

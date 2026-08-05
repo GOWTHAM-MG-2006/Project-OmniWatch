@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prioritization
+  namespace: omniwatch
+  labels:
+    app: prioritization
+    tier: backend
+    phase: "8"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prioritization
+  template:
+    metadata:
+      labels:
+        app: prioritization
+        tier: backend
+        phase: "8"
+    spec:
+      containers:
+        - name: omniwatch-prioritization
+          image: omniwatch/prioritization:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8009
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: prioritization-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8009
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8009
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

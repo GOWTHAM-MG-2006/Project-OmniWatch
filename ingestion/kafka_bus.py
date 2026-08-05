@@ -52,6 +52,7 @@ TOPIC_EVENTS_NORMALIZED = "omniwatch.events.normalized"
 TOPIC_SECURITY_NORMALIZED = "omniwatch.security.normalized"
 # Downstream topics (Phase 3+)
 TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
+TOPIC_INCIDENTS_CAUSAL = "omniwatch.incidents.causal"
 TOPIC_INCIDENTS_CREATED = "omniwatch.incidents.created"
 TOPIC_REMEDIATION_ACTIONS = "omniwatch.remediation.actions"
 
@@ -71,6 +72,7 @@ ALL_TOPICS: list[str] = [
     TOPIC_SECURITY_NORMALIZED,
     # Downstream
     TOPIC_ANOMALIES_DETECTED,
+    TOPIC_INCIDENTS_CAUSAL,
     TOPIC_INCIDENTS_CREATED,
     TOPIC_REMEDIATION_ACTIONS,
 ]
@@ -171,6 +173,12 @@ TOPIC_SPECS: dict[str, TopicSpec] = {
         producer="predictive",
         consumer="prioritization",
         description="Detected anomaly signals from predictive layer",
+    ),
+    TOPIC_INCIDENTS_CAUSAL: TopicSpec(
+        name=TOPIC_INCIDENTS_CAUSAL,
+        producer="causal",
+        consumer="prioritization",
+        description="Root cause analysis results from causal engine",
     ),
     TOPIC_INCIDENTS_CREATED: TopicSpec(
         name=TOPIC_INCIDENTS_CREATED,
