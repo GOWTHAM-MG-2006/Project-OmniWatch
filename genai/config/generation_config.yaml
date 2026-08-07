@@ -1,0 +1,39 @@
+generation:
+  default_model: "qwen3:8b"
+  max_tokens: 2048
+  temperature: 0.3
+  timeout_seconds: 60
+  retry_attempts: 2
+  thinking_block_removal: true
+
+validation:
+  fuzzy_match_enabled: true
+  min_entity_confidence: 0.7
+  max_retries: 2
+
+storage:
+  minio_auto_create: true
+  artifact_buckets:
+    summary: "omniwatch-runbooks"
+    runbook: "omniwatch-runbooks"
+    report: "omniwatch-runbooks"
+    postmortem: "omniwatch-runbooks"
+
+kafka:
+  consumer_group: "omniwatch-genai-group"
+  topics:
+    consume:
+      - "omniwatch.incidents.created"
+      - "omniwatch.remediation.actions"
+    produce:
+      summaries: "omniwatch.generated.summaries"
+      runbooks: "omniwatch.generated.runbooks"
+      reports: "omniwatch.generated.reports"
+
+prompts:
+  directory: "genai/config/system_prompts"
+  files:
+    summary: "summary.txt"
+    runbook: "runbook.txt"
+    report: "report.txt"
+    postmortem: "postmortem.txt"

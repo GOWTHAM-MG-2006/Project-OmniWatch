@@ -1,0 +1,28 @@
+# =============================================================================
+# OmniWatch — Generative AI Layer (Phase 10)
+# =============================================================================
+#
+# Runtime dependencies for the GenAI service (grounded LLM client,
+# compliance report generator, output validator).
+# =============================================================================
+
+# -- HTTP client (Ollama API) -------------------------------------------------
+httpx>=0.24                            # Async HTTP client (grounded_llm_client.py)
+
+# -- Configuration / validation ------------------------------------------------
+pydantic>=2.0                          # Data validation (models.py)
+pydantic-settings>=2.1.0               # Env-var loading (settings.py)
+
+# -- Storage clients -----------------------------------------------------------
+clickhouse-connect>=0.0.14             # ClickHouse HTTP client (compliance_reporter.py)
+minio>=7.0                             # MinIO S3-compatible client (compliance_reporter.py)
+
+# -- Kafka producer/consumer --------------------------------------------------
+confluent-kafka>=2.6.0                 # Kafka client (genai_consumer.py, genai_producer.py)
+
+# -- Configuration files ------------------------------------------------------
+pyyaml>=6.0                            # YAML config (generation_config.yaml)
+
+# -- API framework (health endpoint) -------------------------------------------
+fastapi>=0.100                         # FastAPI app (generation_engine.py, compliance_reporter.py)
+uvicorn[standard]>=0.23                # ASGI server (generation_engine CLI)

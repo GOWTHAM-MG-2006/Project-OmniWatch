@@ -125,6 +125,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: omniwatch-ollama
+    runtime: nvidia
     networks:
       - omniwatch-network
     ports:
@@ -132,7 +133,7 @@ services:
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "ps"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -483,6 +484,131 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Generative AI Engine — Phase 10 (grounded LLM, compliance reports)
+  # ---------------------------------------------------------------------------
+  genai-service:
+    build:
+      context: .
+      dockerfile: genai/Dockerfile
+    container_name: omniwatch-genai
+    networks:
+      - omniwatch-network
+    ports:
+      - "8020:8020"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      MINIO_ENDPOINT: minio:9010
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      MINIO_AUTO_CREATE: "true"
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: qwen3:8b
+      LLM_BACKEND: ollama
+      VLLM_BASE_URL: http://localhost:8000
+      GENAI_API_PORT: "8020"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # GenAI Kafka Consumer — Phase 10 (incident → summary/report/postmortem;
+  #                                remediation → runbook, persist + publish)
+  # ---------------------------------------------------------------------------
+  genai-consumer:
+    build:
+      context: .
+      dockerfile: genai/Dockerfile
+    container_name: omniwatch-genai-consumer
+    networks:
+      - omniwatch-network
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      MINIO_ENDPOINT: minio:9010
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      MINIO_AUTO_CREATE: "true"
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: qwen2.5:0.5b
+      LLM_BACKEND: ollama
+      VLLM_BASE_URL: http://localhost:8000
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    command: ["python", "-m", "genai.genai_consumer"]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Orchestration Engine — Phase 9 (OPA + auto-remediation)
+  # ---------------------------------------------------------------------------
+  orchestration-engine:
+    build:
+      context: .
+      dockerfile: orchestration/Dockerfile
+    container_name: omniwatch-orchestration
+    networks:
+      - omniwatch-network
+    ports:
+      - "8015:8015"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+      OPA_URL: http://opa:8181
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: omniwatch
+      MINIO_ENDPOINT: minio:9010
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      opa:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8015/health"]
       interval: 30s
       timeout: 10s
       retries: 5

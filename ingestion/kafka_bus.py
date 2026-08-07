@@ -55,6 +55,10 @@ TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
 TOPIC_INCIDENTS_CAUSAL = "omniwatch.incidents.causal"
 TOPIC_INCIDENTS_CREATED = "omniwatch.incidents.created"
 TOPIC_REMEDIATION_ACTIONS = "omniwatch.remediation.actions"
+# Generated topics (Phase 10 — GenAI layer)
+TOPIC_GENERATED_SUMMARIES = "omniwatch.generated.summaries"
+TOPIC_GENERATED_RUNBOOKS = "omniwatch.generated.runbooks"
+TOPIC_GENERATED_REPORTS = "omniwatch.generated.reports"
 
 ALL_TOPICS: list[str] = [
     # Raw
