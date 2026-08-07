@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
@@ -92,6 +93,8 @@ class PrioritizationEngine:
         self._processed = 0
         self._published = 0
         self._deduplicated = 0
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
 
     @property
     def processed(self) -> int:
@@ -170,10 +173,30 @@ class PrioritizationEngine:
         """Start the engine: initialize consumer/producer, begin polling."""
         self._producer.start()
         self._consumer.start()
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._poll_loop,
+            name="prioritization-poll",
+            daemon=True,
+        )
+        self._thread.start()
         _LOG.info("prioritization engine started")
+
+    def _poll_loop(self) -> None:
+        """Background poll loop: consume and process until stopped."""
+        while self._running:
+            try:
+                self.consume_and_process(timeout=5.0, max_messages=100)
+            except Exception as exc:  # noqa: BLE001 - loop must survive transient errors
+                _LOG.error("prioritization poll loop error: %s", exc)
+            time.sleep(0.5)
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the engine: close consumer/producer."""
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            self._thread = None
         self._consumer.stop(timeout=timeout)
         self._producer.stop(timeout=timeout)
         _LOG.info("prioritization engine stopped")
