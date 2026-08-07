@@ -49,4 +49,7 @@ EXPOSE 8008
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8008/health || exit 1
 
-CMD ["uvicorn", "causal_engine:app", "--host", "0.0.0.0", "--port", "8008"]
+# The __main__ block in causal_engine.py wires the Kafka consumer thread
+# BEFORE starting uvicorn; running uvicorn directly would skip consumer
+# startup and the service would never publish omniwatch.incidents.causal.
+CMD ["python", "causal_engine.py"]

@@ -232,7 +232,7 @@ services:
       context: ./entity-resolution/flink
       dockerfile: Dockerfile
     container_name: omniwatch-entity-resolution
-    command: ["sleep", "infinity"]
+    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.entity.EntityResolutionJob /opt/flink/jobs/omniwatch-entity-resolution-job.jar && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
     networks:
       - omniwatch-network
     volumes:
@@ -246,11 +246,11 @@ services:
       flink-jobmanager:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
+      test: ["CMD-SHELL", "curl -fsS http://flink-jobmanager:8081/jobs/overview | grep -q '\"state\":\"RUNNING\"'"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 90s
 
   # ---------------------------------------------------------------------------
   # MinIO Bucket Init — creates required buckets before Flink starts
@@ -356,13 +356,16 @@ services:
       context: ./feature-store/flink
       dockerfile: Dockerfile
     container_name: omniwatch-feature-store-flink
-    command: ["sleep", "infinity"]
+    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.features.FeatureStoreJob /opt/flink/jobs/omniwatch-feature-store-job.jar --kafka.brokers kafka:29092 --clickhouse.host clickhouse --clickhouse.port 8123 --clickhouse.db omniwatch && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
     networks:
       - omniwatch-network
     volumes:
       - ./feature-store/flink/build/libs:/jobs
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
     depends_on:
       kafka:
         condition: service_healthy
@@ -371,11 +374,11 @@ services:
       flink-jobmanager:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://flink-jobmanager:8081"]
+      test: ["CMD-SHELL", "curl -fsS http://flink-jobmanager:8081/jobs/overview | grep -q '\"state\":\"RUNNING\"'"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 90s
 
   # ---------------------------------------------------------------------------
   # Feature Store API — serves computed feature vectors (Phase 4)
@@ -446,6 +449,48 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Causal Graph Engine — Phase 7 (PyRCA DAG traversal → root cause)
+  # ---------------------------------------------------------------------------
+  causal:
+    build:
+      context: .
+      dockerfile: causal/Dockerfile
+    container_name: omniwatch-causal
+    networks:
+      - omniwatch-network
+    ports:
+      - "8008:8008"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_GROUP_ID: omniwatch-causal-group
+      KAFKA_AUTO_OFFSET_RESET: earliest
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: omniwatch
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CAUSAL_MAX_DEPTH: 10
+      CAUSAL_MIN_CONFIDENCE: 0.3
+    depends_on:
+      kafka:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      predictive:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -582,7 +627,7 @@ services:
     networks:
       - omniwatch-network
     ports:
-      - "8015:8015"
+      - "8010:8010"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
@@ -596,6 +641,9 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_SECURE: "false"
+      OMNIWATCH_APPROVAL_SELECT_PENDING: "true"
+      OMNIWATCH_APPROVAL_UPDATE_DECISION: "true"
+      OMNIWATCH_APPROVAL_LEARNING_PRODUCER: "true"
     depends_on:
       kafka:
         condition: service_healthy
@@ -608,7 +656,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8015/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
       interval: 30s
       timeout: 10s
       retries: 5

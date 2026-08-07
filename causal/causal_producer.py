@@ -38,9 +38,7 @@ class CausalProducer:
             acks="all",
             retries=3,
             retry_backoff_ms=500,
-            compression_type="snappy",
             linger_ms=10,
-            batch_num_messages=500,
         )
 
     # ------------------------------------------------------------------ #
