@@ -217,9 +217,19 @@ class TestPipelineConsumer:
     def test_consumer_handles_incident_message(self) -> None:
         from genai.genai_consumer import GenAIConsumer
 
-        with patch("genai.genai_consumer.Consumer") as mock_consumer_cls:
+        with (
+            patch("genai.genai_consumer.Consumer") as mock_consumer_cls,
+            patch("genai.grounded_llm_client.GroundedLLMClient") as mock_llm_cls,
+        ):
             mock_consumer_cls.return_value = MagicMock()
             consumer = GenAIConsumer()
+
+            mock_store = MagicMock()
+            mock_producer = MagicMock()
+            consumer._store = mock_store
+            consumer._producer = mock_producer
+
+            mock_llm_cls.return_value = _patched_client()
 
             value = json.dumps({
                 "incident_id": "test-001",
@@ -248,13 +258,25 @@ class TestPipelineConsumer:
             stats = consumer.get_stats()
             assert stats["consumed"] == 1
             assert stats["generated"] == 1
+            assert mock_store.persist.call_count == 3
+            assert mock_producer.produce.call_count == 3
 
     def test_consumer_handles_remediation_message(self) -> None:
         from genai.genai_consumer import GenAIConsumer
 
-        with patch("genai.genai_consumer.Consumer") as mock_consumer_cls:
+        with (
+            patch("genai.genai_consumer.Consumer") as mock_consumer_cls,
+            patch("genai.grounded_llm_client.GroundedLLMClient") as mock_llm_cls,
+        ):
             mock_consumer_cls.return_value = MagicMock()
             consumer = GenAIConsumer()
+
+            mock_store = MagicMock()
+            mock_producer = MagicMock()
+            consumer._store = mock_store
+            consumer._producer = mock_producer
+
+            mock_llm_cls.return_value = _patched_client()
 
             value = json.dumps({
                 "incident_id": "test-001",
@@ -271,6 +293,8 @@ class TestPipelineConsumer:
             stats = consumer.get_stats()
             assert stats["consumed"] == 1
             assert stats["generated"] == 1
+            assert mock_store.persist.call_count == 1
+            assert mock_producer.produce.call_count == 1
 
     def test_consumer_increments_errors_on_bad_json(self) -> None:
         from genai.genai_consumer import GenAIConsumer

@@ -23,7 +23,10 @@ RUN gradle clean shadowJar --no-daemon
 # ---- Stage 2: Flink runtime ----
 FROM flink:1.17-scala_2.12
 
-# Copy the built job jar into the Flink lib directory
-COPY --from=builder /app/build/libs/omniwatch-entity-resolution-job.jar /opt/flink/lib/
+# Copy the built job jar into the jobs directory (NOT /opt/flink/lib/).
+# Putting the fat jar in lib/ pollutes the global 'app' classpath, so
+# `flink run` on the same jar triggers a ChildFirstClassLoader LinkageError
+# (duplicate kafka-clients / flink-connector-kafka classes).
+COPY --from=builder /app/build/libs/omniwatch-entity-resolution-job.jar /opt/flink/jobs/
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

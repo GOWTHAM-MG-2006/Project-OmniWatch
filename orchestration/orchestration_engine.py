@@ -13,8 +13,9 @@ Outputs: ActionResult published to omniwatch.remediation.actions; ApprovalRecord
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 from fastapi import FastAPI
 
@@ -25,6 +26,19 @@ from orchestration.orchestrator import Orchestrator
 from storage.common import create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.orchestration.engine")
+
+# ---------------------------------------------------------------------------
+# Approval API env flags — when truthy, real ClickHouse/Kafka callables are
+# wired into the approval API at startup (see _resolve_approval_deps).
+# ---------------------------------------------------------------------------
+_ENV_SELECT_PENDING = "OMNIWATCH_APPROVAL_SELECT_PENDING"
+_ENV_UPDATE_DECISION = "OMNIWATCH_APPROVAL_UPDATE_DECISION"
+_ENV_LEARNING_PRODUCER = "OMNIWATCH_APPROVAL_LEARNING_PRODUCER"
+
+
+def _env_flag(name: str) -> bool:
+    """Return True when an env var is set to a truthy value."""
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 # ---------------------------------------------------------------------------
 # Module-level state — set by _build_orchestrator / configure()
@@ -67,6 +81,69 @@ def _create_consumer(
         settings=settings,
         handle_message=handle_message,
     )
+
+
+def _make_learning_producer(settings: Settings) -> Callable[[dict[str, Any]], None]:
+    """Build a Kafka producer for denial records sent to the learning loop.
+
+    Returns a callable ``(record: dict) -> None`` that publishes the denial
+    to ``omniwatch.remediation.actions`` (consumed by the learning loop and
+    dashboard per AGENTS.md).  Fail-soft: connection errors are logged and
+    never raised, matching the approval API's fail-soft contract.
+    """
+    from ingestion.kafka_bus import KafkaProducer, TOPIC_REMEDIATION_ACTIONS
+
+    producer = KafkaProducer(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        client_id="omniwatch-orchestration-learning",
+    )
+    producer.start()
+
+    def _publish(record: dict[str, Any]) -> None:
+        producer.send(
+            TOPIC_REMEDIATION_ACTIONS,
+            record,
+            key=str(record.get("approval_id", "unknown")),
+        )
+        producer.flush(timeout=5.0)
+
+    return _publish
+
+
+def _resolve_approval_deps(
+    settings: Settings,
+    *,
+    approval_select_pending: Any,
+    approval_update_decision: Any,
+    approval_learning_producer: Any,
+) -> tuple[Any, Any, Any]:
+    """Resolve approval API dependencies from env flags when not injected.
+
+    Explicitly injected callables (tests) always win.  When an argument is
+    ``None`` and the corresponding ``OMNIWATCH_APPROVAL_*`` env flag is
+    truthy, the real ClickHouse / Kafka callables are wired in.
+    """
+    select_pending = approval_select_pending
+    update_decision = approval_update_decision
+    learning_producer = approval_learning_producer
+
+    if select_pending is None and _env_flag(_ENV_SELECT_PENDING):
+        from storage.clickhouse.client import select_pending_approvals
+
+        select_pending = select_pending_approvals
+        _LOG.info("approval select_pending wired from env flag")
+
+    if update_decision is None and _env_flag(_ENV_UPDATE_DECISION):
+        from storage.clickhouse.client import update_approval_decision
+
+        update_decision = update_approval_decision
+        _LOG.info("approval update_decision wired from env flag")
+
+    if learning_producer is None and _env_flag(_ENV_LEARNING_PRODUCER):
+        learning_producer = _make_learning_producer(settings)
+        _LOG.info("approval learning_producer wired from env flag")
+
+    return select_pending, update_decision, learning_producer
 
 
 # ---------------------------------------------------------------------------
@@ -154,11 +231,18 @@ def create_app(
     app.state.settings = settings
     app.state.orchestrator = orchestrator
 
-    # Configure approval API dependencies
+    # Configure approval API dependencies — explicit injection wins, otherwise
+    # the OMNIWATCH_APPROVAL_* env flags decide whether real callables are wired.
+    select_pending, update_decision, learning_producer = _resolve_approval_deps(
+        settings,
+        approval_select_pending=approval_select_pending,
+        approval_update_decision=approval_update_decision,
+        approval_learning_producer=approval_learning_producer,
+    )
     approval_api.configure(
-        select_pending=approval_select_pending,
-        update_decision=approval_update_decision,
-        learning_producer=approval_learning_producer,
+        select_pending=select_pending,
+        update_decision=update_decision,
+        learning_producer=learning_producer,
     )
 
     # Mount approval API router

@@ -208,7 +208,7 @@ public final class FeatureStoreJob {
     static ObjectMapper createMapper() {
         return new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-                .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+                .setPropertyNamingStrategy(PropertyNamingStrategies.LOWER_CAMEL_CASE);
     }
 
     /** Pre-flight Kafka reachability check: 5 attempts, 5s apart, then fail. */

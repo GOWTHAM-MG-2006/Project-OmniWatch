@@ -445,3 +445,67 @@ def insert_pending_approvals(record: dict[str, Any]) -> int:
         raise
     finally:
         client.close()
+
+
+def select_pending_approvals(limit: int = 100) -> list[dict[str, Any]]:
+    """Return undecided approval rows from ``omniwatch.pending_approvals``.
+
+    Module-level convenience — creates a temporary :class:`ClickHouseClient`,
+    queries rows whose ``status`` is ``pending`` (newest first), and closes
+    the client.  Returns a list of dicts keyed by the ``PENDING_APPROVALS_COLUMNS``
+    columns (``decided_at`` is ``None`` while pending).
+    """
+    logger = create_logger("omniwatch.storage.clickhouse")
+    client = ClickHouseClient()
+    try:
+        sql = (
+            "SELECT * FROM omniwatch.pending_approvals "
+            "WHERE status = 'pending' "
+            "ORDER BY created_at DESC LIMIT %(limit)s"
+        )
+        return client._query(sql, {"limit": limit})
+    except Exception as exc:
+        logger.error("failed to select pending approvals error=%s", exc)
+        raise
+    finally:
+        client.close()
+
+
+def update_approval_decision(
+    approval_id: str, decision: str, decided_at: str
+) -> bool:
+    """Record a decision on a pending approval row.
+
+    Module-level convenience — creates a temporary :class:`ClickHouseClient`,
+    runs a ClickHouse ``ALTER TABLE ... UPDATE`` mutation setting ``status``
+    and ``decided_at`` for the matching ``approval_id``, and closes the client.
+    Returns ``True`` when the mutation was accepted.
+    """
+    logger = create_logger("omniwatch.storage.clickhouse")
+    client = ClickHouseClient()
+    try:
+        sql = (
+            "ALTER TABLE omniwatch.pending_approvals "
+            "UPDATE status = %(status)s, decided_at = %(decided_at)s "
+            "WHERE approval_id = %(approval_id)s"
+        )
+        client.get_client().execute(sql, {
+            "status": decision,
+            "decided_at": decided_at,
+            "approval_id": approval_id,
+        })
+        logger.info(
+            "updated approval decision approval_id=%s status=%s",
+            approval_id,
+            decision,
+        )
+        return True
+    except Exception as exc:
+        logger.error(
+            "failed to update approval decision approval_id=%s error=%s",
+            approval_id,
+            exc,
+        )
+        return False
+    finally:
+        client.close()

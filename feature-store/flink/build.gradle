@@ -62,6 +62,10 @@ dependencies {
 
     // ClickHouse JDBC driver for the FeatureStoreWriter sink (feature_vectors table)
     implementation 'com.clickhouse:clickhouse-jdbc:0.6.4'
+    // clickhouse-jdbc's Apache HTTP client 5 transport needs these at runtime;
+    // without them the sink throws NoClassDefFoundError (ClassicHttpRequest).
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.2.1'
+    implementation 'org.apache.httpcomponents.core5:httpcore5:5.2.2'
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
