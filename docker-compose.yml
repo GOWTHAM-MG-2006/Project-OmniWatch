@@ -614,6 +614,13 @@ services:
       ollama:
         condition: service_healthy
     command: ["python", "-m", "genai.genai_consumer"]
+    # Necessary (GAP 4): no HTTP endpoint here, so probe Kafka readiness instead of the Dockerfile's dead :8020/health.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'from confluent_kafka import Consumer; c=Consumer({\"bootstrap.servers\":\"kafka:29092\",\"group.id\":\"hc-genai-consumer\"}); c.list_topics(timeout=5); c.close()' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
