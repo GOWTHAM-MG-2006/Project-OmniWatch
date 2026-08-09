@@ -16,11 +16,29 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 
+import sys
+
 from services.common.anomaly_injector import AnomalyEngine, add_routes
 from services.common.otel_setup import get_logger, init_otel
 
 from middleware import AuthMiddleware, OTelMiddleware
 from routes import router
+
+# ---------------------------------------------------------------------------
+# Logging configuration — MUST be at module level so OTel init messages are visible
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry — initialise at module level BEFORE any code that calls
+# get_meter(), so instruments are registered with the real MeterProvider
+# instead of the no-op meter.
+# ---------------------------------------------------------------------------
+init_otel("api-gateway")
 
 # ---------------------------------------------------------------------------
 # Application factory
@@ -55,13 +73,12 @@ logger = logging.getLogger("omniwatch.api_gateway")
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """Initialise OpenTelemetry SDK and log startup confirmation.
+    """Log startup confirmation.
 
-    ``init_otel`` sets up the global MeterProvider, TracerProvider, and
-    LoggerProvider instances. It is safe to call even if the OTel Collector
-    is not yet reachable (falls back to no-op).
+    OTel SDK is already initialised at module level (before FastAPI app creation)
+    so the MeterProvider / TracerProvider / LoggerProvider are ready when
+    OTelMiddleware instruments are constructed.
     """
-    init_otel("api-gateway")
     logger.info("API Gateway started — title=%s version=%s", app.title, app.version)
 
 

@@ -61,9 +61,9 @@ class AnomalyProducer:
             acks="all",
             retries=3,
             retry_backoff_ms=500,
-            compression_type="snappy",
             linger_ms=10,
-            batch_num_messages=500,
+            # batch_num_messages is kafka-python-specific; kafka-python-ng
+            # uses batch_size (bytes) and message_size defaults instead.
         )
 
         # ClickHouse client (lazy — created on first use)
@@ -119,15 +119,12 @@ class AnomalyProducer:
         enriched["anomaly_id"] = str(uuid.uuid4())
         enriched.setdefault("status", "active")
 
-        # Fill optional security columns with None so the row aligns to the
-        # 15-column ANOMALIES_COLUMNS schema in storage/clickhouse/client.py.
-        for col in (
-            "attack_type",
-            "severity",
-            "evidence_logs",
-            "recommended_action",
-            "source_ip",
-        ):
+        # Fill optional security columns so the row aligns to the 15-column
+        # ANOMALIES_COLUMNS schema in storage/clickhouse/client.py. Non-nullable
+        # String columns get "" (None would raise DataError); nullable ones get None.
+        for col in ("attack_type", "severity", "evidence_logs"):
+            enriched.setdefault(col, "")
+        for col in ("recommended_action", "source_ip"):
             enriched.setdefault(col, None)
 
         client = self._get_ch_client()

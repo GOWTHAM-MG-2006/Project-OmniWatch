@@ -38,7 +38,8 @@ def _parse_timestamp(ts: Any) -> Optional[datetime]:
             return None
     if isinstance(ts, str):
         try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
     return None

@@ -12,8 +12,25 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+import sys
+
 from services.common.anomaly_injector import AnomalyEngine, add_routes
 from services.common.otel_setup import get_logger, init_otel
+
+# ---------------------------------------------------------------------------
+# Logging configuration — MUST be at module level so OTel init messages are visible
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry — initialise at module level BEFORE routes.py imports
+# (routes.py creates module-level instruments via get_meter() at import time)
+# ---------------------------------------------------------------------------
+init_otel("user-service")
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -52,8 +69,11 @@ logger = logging.getLogger("omniwatch.user_service")
 
 @app.on_event("startup")
 async def startup() -> None:
-    """Initialize OTel SDK and register anomaly injection routes."""
-    init_otel("user-service")
+    """Register anomaly injection routes.
+
+    OTel SDK is already initialised at module level before routes.py import,
+    so the module-level _meter in routes.py gets a real meter.
+    """
     add_routes(app.router, engine)
     logger.info("user-service started — OTel initialized, anomaly routes registered")
 

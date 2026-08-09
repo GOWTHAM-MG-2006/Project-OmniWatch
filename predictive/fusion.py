@@ -175,14 +175,23 @@ class BayesianFusionEngine:
     def _fallback_fuse(self, scores: Dict[str, float]) -> float:
         """Weighted mean of the present detector scores (cold-start fallback).
 
-        Detectors missing from *scores* contribute ``0.0``.  Weights default
-        to ``1.0`` per detector unless overridden via ``detector_weights``.
+        Only detectors that actually fired (present in *scores*) are
+        included — a detector that did not fire contributes no evidence and
+        must not dilute the fused score with a ``0.0``.  Weights default to
+        ``1.0`` per detector unless overridden via ``detector_weights``.
         """
+        present = {
+            det: float(val)
+            for det, val in scores.items()
+            if det in self._detector_order and val is not None
+        }
+        if not present:
+            return 0.0
         acc = 0.0
         total_weight = 0.0
-        for detector in self._detector_order:
+        for detector, value in present.items():
             weight = self._weights.get(detector, 1.0)
-            acc += weight * float(scores.get(detector, 0.0))
+            acc += weight * value
             total_weight += weight
         if total_weight == 0.0:
             return 0.0

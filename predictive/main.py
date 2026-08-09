@@ -13,7 +13,9 @@ import glob
 import json
 import logging
 import os
+import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,14 +23,171 @@ from fastapi import FastAPI
 
 logger = logging.getLogger("omniwatch.predictive.main")
 
+# Configure logging at module level so messages are visible when uvicorn
+# imports this module (not just when run via `python -m predictive.main`).
+# Without this, INFO/ERROR logs are silently dropped by Python's lastResort.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+
+# Module-level stop event for the detection daemon thread
+_stop_event: threading.Event = threading.Event()
+
+# --------------------------------------------------------------------------- #
+# Detection daemon — polls ClickHouse feature_vectors and runs DetectorEngine
+# --------------------------------------------------------------------------- #
+
+def _detection_worker(
+    engine: Any | None = None,
+    feature_reader: Any | None = None,
+    poll_interval: float = 5.0,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Background daemon that polls ClickHouse for fresh feature vectors and
+    runs them through the DetectorEngine.
+
+    Discovers entities via ``FeatureReader.list_entities()``, reads the most
+    recent feature vectors for each entity, and passes each one to
+    ``DetectorEngine.process_message()``.  Confirmed anomalies are logged via
+    ``log_detection_event()`` (which updates last-anomaly state on /health).
+
+    The engine's ``AnomalyProducer.publish()`` handles Kafka + ClickHouse
+    writes internally — the worker only orchestrates.
+
+    **Incremental processing:**  The worker tracks the last-processed
+    ``window_start`` timestamp per entity so each poll only processes vectors
+    that have arrived *since the previous poll*.  On the very first poll for
+    an entity, it reads a larger initial batch (for cold-start training)
+    then remembers the latest timestamp so subsequent polls only see new data.
+    """
+    from predictive.config.settings import Settings
+    from predictive.detector_engine import DetectorEngine
+    from predictive.feature_reader import FeatureReader
+
+    logger.info("predictive detection loop started")
+
+    settings = Settings.from_env()
+    if engine is None:
+        engine = DetectorEngine(settings)
+    else:
+        engine = engine
+    if feature_reader is None:
+        feature_reader = FeatureReader(settings)
+    if stop_event is None:
+        stop_event = _stop_event
+
+    # Bind engine for live introspection on /health
+    bind_detector_engine(engine)
+
+    # Track last-processed window_start per entity so we only score NEW vectors.
+    # On the first poll for an entity, we read a larger batch to give the
+    # cold-start buffer enough samples to train on (30+).
+    #
+    # Score ONLY 5-minute windows: the anomaly signal (latency P50/P95 spiking in
+    # the simulation scenarios) is carried by the "5m" aggregation rows.  The
+    # 1m rows are emitted at a higher cadence with earlier window_start values
+    # (and near-zero baseline latency), so a cursor that advances to the newest
+    # 1m row's window_start would permanently skip the older 5m anomaly rows.
+    # Filtering at the source keeps the cursor on the signal-bearing rows.
+    _FEATURE_WINDOW_SIZE = "5m"
+    _INITIAL_BATCH_SIZE = 500
+    _POLL_BATCH_SIZE = 500
+    _last_processed: dict[str, str] = {}
+
+    while not stop_event.is_set():
+        try:
+            entities = feature_reader.list_entities()
+            if not entities:
+                logger.debug("no entities found in feature_vectors — idle")
+            else:
+                logger.debug("discovered %d entities: %s", len(entities), entities[:5])
+
+            for entity_id in entities:
+                if stop_event.is_set():
+                    break
+                try:
+                    # Read only vectors newer than the last-processed timestamp.
+                    # First poll for an entity: last_processed is absent → read
+                    # a large initial batch for cold-start training.
+                    since = _last_processed.get(entity_id)
+                    batch_size = _INITIAL_BATCH_SIZE if since is None else _POLL_BATCH_SIZE
+                    features = feature_reader.read_features(
+                        entity_id,
+                        limit=batch_size,
+                        start=since,
+                        window_size=_FEATURE_WINDOW_SIZE,
+                    )
+                    if not features:
+                        continue
+
+                    for fv in features:
+                        if stop_event.is_set():
+                            break
+                        signal = engine.process_message(fv)
+                        if signal is not None:
+                            log_detection_event(
+                                detector_name=signal.get("detector_name", "unknown"),
+                                entity_id=signal.get("entity_id", "unknown"),
+                                metric_name=signal.get("metric_name", "unknown"),
+                                score=signal.get("anomaly_score", 0.0),
+                            )
+
+                    # Update last-processed timestamp to the newest vector we saw
+                    last_ts = features[-1].get("window_start", "")
+                    if last_ts:
+                        _last_processed[entity_id] = str(last_ts)
+
+                except Exception as exc:
+                    logger.error(
+                        "error processing entity %s: %s",
+                        entity_id,
+                        exc,
+                        exc_info=True,
+                    )
+        except Exception:
+            logger.error("detection loop error — retrying", exc_info=True)
+
+        stop_event.wait(timeout=poll_interval)
+
+    # Cleanup
+    try:
+        engine.close()
+    except Exception:
+        logger.debug("error closing detector engine", exc_info=True)
+    try:
+        feature_reader.close()
+    except Exception:
+        logger.debug("error closing feature reader", exc_info=True)
+    logger.info("predictive detection loop stopped")
+
+
 # --------------------------------------------------------------------------- #
 # App
 # --------------------------------------------------------------------------- #
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan — starts the detection daemon on bootstrap."""
+    logger.info("Starting OmniWatch Predictive Intelligence Layer")
+    _stop_event.clear()
+    _detection_thread = threading.Thread(
+        target=_detection_worker,
+        name="omniwatch-detection-loop",
+        daemon=True,
+    )
+    _detection_thread.start()
+    yield
+    _stop_event.set()
+    _detection_thread.join(timeout=10.0)
+    logger.info("OmniWatch Predictive Intelligence Layer stopped")
+
 
 app = FastAPI(
     title="OmniWatch Predictive Intelligence",
     description="Phase 6 — Anomaly detection + security signal classifier health endpoint",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Module-level state — last anomaly published by the detector engine

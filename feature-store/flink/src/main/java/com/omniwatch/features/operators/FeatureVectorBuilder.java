@@ -160,8 +160,12 @@ public class FeatureVectorBuilder
         // --- 5. Merge request volume (sum of counts) ---
         agg[IDX_TOTAL_COUNT] += wf.getCount();
 
-        // --- 6. Merge window bounds (earliest start, latest end) ---
-        if (agg[IDX_WINDOW_START] == 0 || wf.getWindowStart() < agg[IDX_WINDOW_START]) {
+        // --- 6. Merge window bounds (latest start, latest end) ---
+        // Advance window_start forward on every incoming window so the emitted
+        // FeatureVector always describes the most recent window. The previous
+        // earliest-start preserve kept rolling vectors frozen on the first
+        // observed window, stalling downstream consumers.
+        if (agg[IDX_WINDOW_START] == 0 || wf.getWindowStart() > agg[IDX_WINDOW_START]) {
             agg[IDX_WINDOW_START] = wf.getWindowStart();
         }
         if (wf.getWindowEnd() > agg[IDX_WINDOW_END]) {

@@ -132,6 +132,9 @@ class IncidentFactory:
         # 6. Archive full incident JSON to MinIO (best-effort)
         self._archive_to_minio(incident)
 
+        # 7. Persist to ClickHouse (best-effort)
+        self._persist_to_clickhouse(incident)
+
         return incident
 
     def _assign(self, severity: str, confidence_normalized: float) -> str:
@@ -179,6 +182,37 @@ class IncidentFactory:
         except Exception as exc:  # noqa: BLE001 - best-effort archival
             _LOG.warning(
                 "failed to archive incident %s to MinIO: %s",
+                incident.incident_id,
+                exc,
+            )
+
+    def _persist_to_clickhouse(self, incident: IncidentRecord) -> None:
+        """Persist the incident record to ClickHouse (best-effort).
+
+        Uses ``flatten_for_clickhouse`` from ``prioritization.models`` to
+        produce the flat row schema expected by ``omniwatch.incidents``.
+        Failures are logged but never block incident creation — the incident
+        is still published to Kafka and archived to MinIO.
+        """
+        try:
+            from storage.clickhouse.client import ClickHouseClient
+            from storage.config import StorageConfig
+            from prioritization.models import flatten_for_clickhouse
+
+            cfg = StorageConfig.from_env()
+            client = ClickHouseClient(config=cfg)
+            try:
+                row = flatten_for_clickhouse(incident)
+                client.insert_incidents([row])
+                _LOG.info(
+                    "persisted incident %s to ClickHouse",
+                    incident.incident_id,
+                )
+            finally:
+                client.close()
+        except Exception as exc:  # noqa: BLE001 - best-effort persistence
+            _LOG.warning(
+                "failed to persist incident %s to ClickHouse: %s",
                 incident.incident_id,
                 exc,
             )

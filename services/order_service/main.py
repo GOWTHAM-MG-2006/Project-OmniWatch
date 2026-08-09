@@ -27,6 +27,13 @@ logging.basicConfig(
 logger = logging.getLogger("omniwatch.order_service")
 
 # ---------------------------------------------------------------------------
+# OpenTelemetry — initialise at module level BEFORE any route handlers
+# (route handlers call get_meter() at request time, which is fine, but
+#  init at module level ensures providers are ready)
+# ---------------------------------------------------------------------------
+init_otel("order-service")
+
+# ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
 
@@ -42,15 +49,11 @@ engine = AnomalyEngine(service_name="order-service")
 
 @app.on_event("startup")
 async def startup() -> None:
-    """Initialise OTel SDK and register anomaly-injection routes."""
-    logger.info("Starting OmniWatch Order Service...")
+    """Register anomaly-injection routes.
 
-    # Initialise OpenTelemetry SDK (metrics, traces, logs)
-    init_otel("order-service")
-
-    # Register anomaly injection endpoints on the app router
+    OTel SDK is already initialised at module level, so providers are ready.
+    """
     add_routes(app.router, engine)
-
     logger.info("OmniWatch Order Service started successfully")
 
 

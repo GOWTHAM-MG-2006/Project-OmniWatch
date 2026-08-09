@@ -83,12 +83,15 @@ class FeatureReader:
             rows = list(reversed(rows))
 
             # Optional Python-side filters (avoids SQL injection surface).
+            # Use window_start (event-time of the Flink window) as the
+            # canonical ordering column so callers can track incremental
+            # progress by the value reported in read_features results.
             if window_size is not None:
                 rows = [r for r in rows if r.get("window_size") == window_size]
             if start is not None:
-                rows = [r for r in rows if r.get("timestamp", "") >= start]
+                rows = [r for r in rows if r.get("window_start", "") >= start]
             if end is not None:
-                rows = [r for r in rows if r.get("timestamp", "") <= end]
+                rows = [r for r in rows if r.get("window_start", "") <= end]
 
             return rows
 
@@ -98,6 +101,25 @@ class FeatureReader:
                 entity_id,
                 exc,
             )
+            return []
+
+    def list_entities(self) -> list[str]:
+        """Return all distinct entity_id values present in ``feature_vectors``.
+
+        Used by the detection loop on startup to discover which entities have
+        enough historical feature data to begin scoring.  Returns an empty
+        list on any error (table missing, connection failure, etc.).
+        """
+        try:
+            client = self._get_ch_client()
+            rows = client._with_retry(
+                lambda: client.get_client().query(
+                    "SELECT DISTINCT entity_id FROM omniwatch.feature_vectors"
+                ).result_rows
+            )
+            return [str(row[0]) for row in rows if row and row[0]]
+        except Exception as exc:  # noqa: BLE001 — graceful degradation
+            logger.warning("Failed to list entities from feature_vectors: %s", exc)
             return []
 
     def close(self) -> None:

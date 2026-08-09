@@ -224,9 +224,13 @@ class AnomalyDetector:
         if not self._feature_cols:
             return None
 
-        scores: List[float] = []
-        deviations: List[float] = []
-        contributions: Dict[str, float] = {}
+        metric_scores: List[float] = []
+        metric_deviations: List[float] = []
+        per_detector_scores: Dict[str, List[float]] = {
+            "z_score": [],
+            "seasonal_naive": [],
+            "isolation_forest": [],
+        }
 
         for metric, value in feature.items():
             if metric not in self._feature_cols:
@@ -239,9 +243,9 @@ class AnomalyDetector:
             std = baseline["std"] if baseline["std"] > 0 else 1.0
             z = abs(value - baseline["mean"]) / std
             z_score_normalised = _sigmoid_normalise(z)
-            scores.append(z_score_normalised)
-            deviations.append(z - _DEFAULT_ZSCORE_THRESHOLD)
-            contributions["z_score"] = z_score_normalised
+            metric_scores.append(z_score_normalised)
+            metric_deviations.append(z - _DEFAULT_ZSCORE_THRESHOLD)
+            per_detector_scores["z_score"].append(z_score_normalised)
 
             # ── Seasonal naive component ────────────────────────────── #
             history = self._seasonal_history.get(metric, [])
@@ -251,9 +255,9 @@ class AnomalyDetector:
                 seasonal_std = baseline["std"] if baseline["std"] > 0 else 1.0
                 seasonal_z = seasonal_resid / seasonal_std
                 seasonal_score = _sigmoid_normalise(seasonal_z)
-                scores.append(seasonal_score)
-                deviations.append(seasonal_z - _DEFAULT_ZSCORE_THRESHOLD)
-                contributions["seasonal_naive"] = seasonal_score
+                metric_scores.append(seasonal_score)
+                metric_deviations.append(seasonal_z - _DEFAULT_ZSCORE_THRESHOLD)
+                per_detector_scores["seasonal_naive"].append(seasonal_score)
 
             # ── T8: feed drift detectors (CUSUM + ADWIN) ────────────── #
             # CUSUM tracks the raw value against its baseline; ADWIN tracks
@@ -284,33 +288,53 @@ class AnomalyDetector:
             raw_score = self._isolation_forest.decision_function(scaled)[0]
             # decision_function: higher = more normal.  Invert & map to [0,1]
             iso_score = float(_clamp(1.0 / (1.0 + math.exp(raw_score))))
-            scores.append(iso_score)
-            deviations.append(-raw_score)  # positive raw → more normal → low deviation
-            contributions["isolation_forest"] = iso_score
+            metric_scores.append(iso_score)
+            metric_deviations.append(-raw_score)  # positive raw → more normal → low deviation
+            per_detector_scores["isolation_forest"].append(iso_score)
 
-        if not scores:
+        if not metric_scores:
             return None
 
-        # ── Composite score ─────────────────────────────────────────── #
-        anomaly_score = float(np.mean(scores))
-        anomaly_score = _clamp(anomaly_score)
+        # ── Aggregate per-detector max ─────────────────────────────── #
+        # Use the MAX per-detector score rather than the mean of all metric
+        # scores.  With ~10 metrics, a single anomalous metric (score=1.0)
+        # would be diluted by 9 normal ones (score≈0) under mean aggregation,
+        # yielding a composite ≈ 0.1 that never clears the 0.5 threshold.
+        # Max aggregation ensures one strongly anomalous metric triggers
+        # detection — which is exactly the behaviour we need for sparse,
+        # single-metric anomalies (e.g. latency spike).
+        detector_maxes: Dict[str, float] = {}
+        for detector_name, score_list in per_detector_scores.items():
+            if score_list:
+                detector_maxes[detector_name] = _clamp(float(np.max(score_list)))
+
+        # Composite = max of per-detector maxes (any detector can trigger)
+        if detector_maxes:
+            anomaly_score = _clamp(float(np.max(list(detector_maxes.values()))))
+        else:
+            anomaly_score = _clamp(float(np.max(metric_scores)))
 
         # ── Threshold gate ──────────────────────────────────────────── #
         if anomaly_score < self._threshold:
             return None
 
         # ── Confidence ──────────────────────────────────────────────── #
-        confidence = float(np.mean([s * 100.0 for s in scores]))
+        # Confidence = max per-detector score × 100 (best evidence wins)
+        confidence = (anomaly_score * 100.0)
         confidence = _clamp(confidence)
         confidence = min(max(confidence, 0.0), 100.0)
 
         # ── Deviation ───────────────────────────────────────────────── #
-        deviation = float(np.mean(deviations)) if deviations else 0.0
+        deviation = float(np.max(metric_deviations)) if metric_deviations else 0.0
         deviation = _clamp(deviation)
 
         # ── Source type heuristic ────────────────────────────────────── #
+        primary_metric = next(
+            (k for k in feature if k in self._feature_cols),
+            "unknown",
+        )
         source_type = "security" if any(
-            kw in str(metric) for kw in ("auth", "login", "access", "crypto")
+            kw in primary_metric for kw in ("auth", "login", "access", "crypto")
         ) else "performance"
 
         # ── Entity / primary metric ─────────────────────────────────── #
@@ -318,11 +342,6 @@ class AnomalyDetector:
         # falling back to "unknown" when the feature carries none.
         entity_id = feature.get("entity_id", "unknown")
 
-        # Primary metric = first real scoring feature (skip metadata keys).
-        primary_metric = next(
-            (k for k in feature if k in self._feature_cols),
-            "unknown",
-        )
 
         # ── Trend direction (provenance) ────────────────────────────── #
         _trend = feature.get("trend_direction")
@@ -342,7 +361,7 @@ class AnomalyDetector:
             "source_type": source_type,
             # ── Provenance fields (Task T1) ────────────────────────── #
             "detector_name": self.__class__.__name__,
-            "detector_contributions": contributions,
+            "detector_contributions": detector_maxes,
             "trend_direction": trend_direction,
             "entity_anomaly_count": 0,
             "resolution_status": "active",

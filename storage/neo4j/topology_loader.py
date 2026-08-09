@@ -37,6 +37,16 @@ Design decisions:
   Kafka bootstrap: Read from KAFKA_BOOTSTRAP_SERVERS env var (default
   localhost:9092). StorageConfig does not carry Kafka settings; they live
   in the ingestion layer's env vars.
+
+  Simulation-First fallback (--demo): The Kafka topic may be empty or carry
+  only unresolved/unknown records (e.g. entity_type=""), which the loader
+  correctly skips — leaving the graph empty and the Phase 7 causal engine
+  with nothing to traverse. To keep the pipeline reproducible without real
+  cloud telemetry, ``python -m storage.neo4j.topology_loader --demo`` loads
+  the built-in DEMO_TOPOLOGY (the AGENTS.md :Service/:Database/
+  :Infrastructure/:K8sResource model with :CALLS/:READS_FROM/:DEPENDS_ON)
+  through the exact same consume_one() code path as Kafka. Idempotent
+  (client-side MERGE) — safe to re-run.
 """
 
 from __future__ import annotations
@@ -96,6 +106,139 @@ NODE_PROPERTY_KEYS = (
     "anomaly_score",
     "last_seen",
 )
+
+# ---------------------------------------------------------------------------
+# Demo topology (Simulation-First fallback)
+# ---------------------------------------------------------------------------
+# Built-in demo topology matching the AGENTS.md node/relationship contract.
+# Loaded via `python -m storage.neo4j.topology_loader --demo` when the Kafka
+# topic is empty or carries only unresolved records, so the causal graph is
+# reproducible without real cloud telemetry. Each record uses the same schema
+# as a Kafka message on omniwatch.entities.resolved and is fed through
+# consume_one() — the identical code path as the live consumer.
+#
+# Entity types map to labels via ENTITY_TYPE_LABEL_MAP:
+#   API_NODE/SERVICE → Service, DATABASE_NODE/DATABASE → Database,
+#   INFRASTRUCTURE → Infrastructure, K8S/K8S_RESOURCE → K8sResource
+# Relationship hints: calls → :CALLS (latency_p50/p95/p99, error_rate),
+# reads_from → :READS_FROM (query_type, avg_duration_ms),
+# depends_on → :DEPENDS_ON (dependency_type, criticality).
+DEMO_TOPOLOGY: List[Dict[str, Any]] = [
+    # --- Services (API_NODE) ---
+    {
+        "entity_id": "api-gateway",
+        "entity_type": "API_NODE",
+        "name": "api-gateway",
+        "type": "API_NODE",
+        "criticality": "high",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+        "calls": ["user-service", "order-service"],
+        "latency_p50": 12.5,
+        "latency_p95": 45.2,
+        "latency_p99": 120.8,
+        "error_rate": 0.02,
+    },
+    {
+        "entity_id": "user-service",
+        "entity_type": "API_NODE",
+        "name": "user-service",
+        "type": "API_NODE",
+        "criticality": "high",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+        "calls": ["order-service"],
+        "latency_p50": 8.2,
+        "latency_p95": 30.1,
+        "latency_p99": 85.4,
+        "error_rate": 0.01,
+        "reads_from": ["postgresql-database"],
+        "query_type": "SELECT",
+        "avg_duration_ms": 12.5,
+    },
+    {
+        "entity_id": "order-service",
+        "entity_type": "API_NODE",
+        "name": "order-service",
+        "type": "API_NODE",
+        "criticality": "high",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+        "reads_from": ["postgresql-database", "redis-cache"],
+        "query_type": "SELECT",
+        "avg_duration_ms": 18.7,
+        "depends_on": ["postgresql-database"],
+        "dependency_type": "storage",
+    },
+    {
+        "entity_id": "background-worker",
+        "entity_type": "SERVICE",
+        "name": "background-worker",
+        "type": "SERVICE",
+        "criticality": "medium",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+        "depends_on": ["postgresql-database"],
+        "dependency_type": "storage",
+    },
+    # --- Databases ---
+    {
+        "entity_id": "postgresql-database",
+        "entity_type": "DATABASE_NODE",
+        "name": "postgresql",
+        "type": "DATABASE_NODE",
+        "criticality": "high",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+    },
+    {
+        "entity_id": "redis-cache",
+        "entity_type": "DATABASE_NODE",
+        "name": "redis",
+        "type": "DATABASE_NODE",
+        "criticality": "medium",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+    },
+    # --- Infrastructure ---
+    {
+        "entity_id": "k8s-cluster",
+        "entity_type": "INFRASTRUCTURE",
+        "name": "k8s-cluster",
+        "type": "INFRASTRUCTURE",
+        "criticality": "high",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+    },
+    # --- K8sResource ---
+    {
+        "entity_id": "order-service-deployment",
+        "entity_type": "K8S_RESOURCE",
+        "name": "order-service-deployment",
+        "type": "K8S_RESOURCE",
+        "criticality": "medium",
+        "cloud_provider": "gcp",
+        "status": "healthy",
+        "anomaly_score": 0.0,
+        "last_seen": "2026-08-08T00:00:00Z",
+        "depends_on": ["k8s-cluster"],
+        "dependency_type": "orchestration",
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -512,12 +655,58 @@ class TopologyLoader:
         self._log.info("cleanup_test_nodes prefix=%s deleted=%d", prefix, count)
         return count
 
+    # ------------------------------------------------------------------ #
+    # Simulation-First fallback (--demo)
+    # ------------------------------------------------------------------ #
+
+    def load_demo_topology(self) -> Dict[str, int]:
+        """Load the built-in demo topology into Neo4j (Simulation-First).
+
+        Feeds every record in :data:`DEMO_TOPOLOGY` through
+        :meth:`consume_one` — the exact same code path the Kafka consumer
+        uses — so the demo graph is a faithful reproduction of what a live
+        ``omniwatch.entities.resolved`` stream would produce. Idempotent:
+        client-side MERGE means re-running never duplicates nodes or
+        relationships.
+
+        Returns ``{"nodes": int, "relationships": int}`` — the post-load
+        counts read back from Neo4j via ``get_topology()``.
+        """
+        for record in DEMO_TOPOLOGY:
+            self.consume_one(record)
+        topology = self._client.get_topology()
+        self._log.info(
+            "demo_topology_loaded nodes=%d relationships=%d",
+            topology["node_count"],
+            topology["relationship_count"],
+        )
+        return {
+            "nodes": topology["node_count"],
+            "relationships": topology["relationship_count"],
+        }
+
 
 # ---------------------------------------------------------------------------
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="OmniWatch Neo4j topology loader — consumes "
+        "omniwatch.entities.resolved, or loads the built-in demo topology "
+        "with --demo (Simulation-First fallback when the Kafka topic is "
+        "empty/unresolved).",
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Load the built-in demo topology into Neo4j and exit (no Kafka "
+        "required). Idempotent — safe to re-run.",
+    )
+    args = parser.parse_args()
+
     create_logger("omniwatch.storage.neo4j.topology_loader")
     cfg = StorageConfig.from_env()
     client = Neo4jClient(cfg)
@@ -528,6 +717,16 @@ if __name__ == "__main__":
     except StorageError as exc:
         print(f"FATAL: Neo4j connection failed: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    if args.demo:
+        loader = TopologyLoader(client=client)
+        counts = loader.load_demo_topology()
+        print(
+            f"Demo topology loaded: {counts['nodes']} nodes, "
+            f"{counts['relationships']} relationships"
+        )
+        client.close()
+        sys.exit(0)
 
     loader = TopologyLoader(client=client)
     loader.run()
