@@ -282,7 +282,7 @@ def mock_vllm_response() -> dict[str, Any]:
         "id": "cmpl-test-001",
         "object": "text_completion",
         "created": 1700000000,
-        "model": "qwen2.5:7b",
+        "model": "qwen3:8b",
         "choices": [
             {
                 "text": json.dumps(grounded),

@@ -172,7 +172,7 @@ class TestBlindSpot06NvidiaConditional:
 # ---------------------------------------------------------------------------
 
 class TestBlindSpot07ModelDefault:
-    def test_default_model_is_llama3_2_3b(self) -> None:
+    def test_default_model_is_qwen3_8b(self) -> None:
         settings = Settings()
         assert settings.llm_model == "qwen3:8b"
 

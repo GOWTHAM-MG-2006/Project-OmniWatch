@@ -606,7 +606,7 @@ services:
       MINIO_SECURE: "false"
       MINIO_AUTO_CREATE: "true"
       OLLAMA_URL: http://ollama:11434
-      LLM_MODEL: qwen2.5:0.5b
+      LLM_MODEL: qwen3:8b
       LLM_BACKEND: ollama
       VLLM_BASE_URL: http://localhost:8000
     depends_on:
