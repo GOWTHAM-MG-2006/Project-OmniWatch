@@ -853,8 +853,11 @@ class TestIntegrationPipeline:
             engine.process_message(_sample_feature(request_volume=1000.0 + i))
         assert engine._is_trained is True
 
-        # A value inside the trained baseline is normal.
-        result = engine.process_message(_sample_feature(latency_p99=1030.0))
+        # A value inside the trained baseline is normal.  Training varied
+        # request_volume across 1000.0..1059.0 (latency/error rate constant
+        # at their own trained values), so a mid-range request_volume is a
+        # normal observation.
+        result = engine.process_message(_sample_feature(request_volume=1030.0))
 
         assert result is None
         assert len(producer.publish_calls) == 0

@@ -151,7 +151,12 @@ class TestWriteToClickHouse:
         producer.write_to_clickhouse(signal)
 
         row = mock_ch_cls.return_value.insert_anomalies.call_args[0][0][0]
-        for col in ("attack_type", "severity", "evidence_logs", "recommended_action", "source_ip"):
+        # Non-nullable String columns get "" (None would raise DataError);
+        # nullable columns get None — matches ANOMALIES_COLUMNS schema.
+        for col in ("attack_type", "severity", "evidence_logs"):
+            assert col in row
+            assert row[col] == ""
+        for col in ("recommended_action", "source_ip"):
             assert col in row
             assert row[col] is None
         producer.close()

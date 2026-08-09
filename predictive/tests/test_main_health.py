@@ -187,8 +187,14 @@ def test_log_detection_event_updates_health_state(monkeypatch, caplog) -> None:
         body = client.get("/health").json()
     assert body["detectors"]["AnomalyDetector"]["last_score"] == 0.91
     assert body["last_anomaly"].startswith("postgresql-database at ")
-    # Structured JSON log emitted with provenance
-    record = caplog.records[-1]
+    # Structured JSON log emitted with provenance.  caplog also captures
+    # records from sibling loggers (e.g. the kafka-flush warning), so pick
+    # the detection-logger record specifically.
+    detection_records = [
+        r for r in caplog.records if r.name == "omniwatch.predictive.detection"
+    ]
+    assert detection_records, "no detection-event record captured"
+    record = detection_records[-1]
     assert record.detector_name == "AnomalyDetector"
     assert record.entity_id == "postgresql-database"
     assert record.metric_name == "cpu_usage"
