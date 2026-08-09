@@ -699,3 +699,136 @@ class TestSecurityEventGenerator:
         """DetectorEngine.close() should close producer."""
         engine.close()
         engine._producer.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 15: model persistence — cold-start save_model flips /health
+# ---------------------------------------------------------------------------
+
+
+class TestModelPersistence:
+    """save_model() wired post cold-start must persist a joblib artifact
+    that flips the /health ``model_loaded`` flag to ``true``."""
+
+    def test_cold_start_persists_model_and_flips_health(
+        self, engine, monkeypatch
+    ):
+        """Real detector through the cold-start gate should write the
+        artifact under predictive/ and make _check_model_loaded() true."""
+        import os
+        import shutil
+        import tempfile
+
+        import predictive.main as main_module
+        from predictive.anomaly_detector import AnomalyDetector
+        from predictive.config.settings import Settings
+
+        # Place the artifact under the predictive root so the /health
+        # glob (predictive_root/**/*.joblib) can find it; clean up after.
+        tmp_model_dir = tempfile.mkdtemp(
+            dir=os.path.dirname(os.path.abspath(main_module.__file__))
+        )
+        model_path = os.path.join(tmp_model_dir, "anomaly_detector.joblib")
+        test_settings = Settings(
+            _env_file=None, predictive_model_path=model_path
+        )
+
+        engine._settings = test_settings
+        engine._detector = AnomalyDetector(settings=test_settings)
+
+        try:
+            for _ in range(engine._cold_start_count):
+                engine.process_message(
+                    {
+                        "entity_id": "order-service",
+                        "latency_p50": 50.0,
+                        "latency_p95": 55.0,
+                        "latency_p99": 60.0,
+                        "error_rate": 0.01,
+                        "request_volume": 1000,
+                    }
+                )
+
+            assert engine._is_trained is True
+            assert os.path.isfile(model_path), (
+                "save_model() should write a joblib artifact post cold-start"
+            )
+
+            assert main_module._check_model_loaded() is True
+
+            monkeypatch.setattr(main_module, "_check_kafka", lambda: True)
+            monkeypatch.setattr(
+                main_module, "_check_clickhouse", lambda: True
+            )
+            from fastapi.testclient import TestClient
+
+            resp = TestClient(main_module.app).get("/health")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["model_loaded"] is True
+            assert body["status"] == "healthy"
+
+            reloaded = AnomalyDetector(settings=test_settings)
+            reloaded.load_model(model_path)
+            assert reloaded._feature_cols == engine._detector._feature_cols
+            assert reloaded._train_count == engine._detector._train_count
+            assert (
+                reloaded._zscore_baselines
+                == engine._detector._zscore_baselines
+            )
+        finally:
+            shutil.rmtree(tmp_model_dir, ignore_errors=True)
+
+    def test_persist_failure_never_breaks_detection(self, engine, monkeypatch):
+        """A failing save must be swallowed (logged), not crash detection."""
+        import predictive.main as main_module
+        from predictive.anomaly_detector import AnomalyDetector
+        from predictive.config.settings import Settings
+
+        import os
+        import tempfile
+
+        tmp_model_dir = tempfile.mkdtemp(
+            dir=os.path.dirname(os.path.abspath(main_module.__file__))
+        )
+        model_path = os.path.join(tmp_model_dir, "anomaly_detector.joblib")
+        test_settings = Settings(
+            _env_file=None, predictive_model_path=model_path
+        )
+
+        engine._settings = test_settings
+        engine._detector = AnomalyDetector(settings=test_settings)
+        # Force save_model to raise on every write.
+        monkeypatch.setattr(
+            engine._detector, "save_model", MagicMock(side_effect=OSError("disk full"))
+        )
+
+        try:
+            for _ in range(engine._cold_start_count + 5):
+                engine.process_message(
+                    {
+                        "entity_id": "order-service",
+                        "latency_p50": 50.0,
+                        "latency_p95": 55.0,
+                        "latency_p99": 60.0,
+                        "error_rate": 0.01,
+                        "request_volume": 1000,
+                    }
+                )
+            # Detection still works past the gate despite the failed save.
+            assert engine._is_trained is True
+            result = engine.process_message(
+                {
+                    "entity_id": "order-service",
+                    "latency_p50": 950.0,
+                    "latency_p95": 1200.0,
+                    "latency_p99": 1500.0,
+                    "error_rate": 0.05,
+                    "request_volume": 1000,
+                }
+            )
+            assert result is not None or engine._fusion is not None
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp_model_dir, ignore_errors=True)

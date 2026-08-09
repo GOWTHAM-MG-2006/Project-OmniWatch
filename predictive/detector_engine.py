@@ -12,6 +12,7 @@ Outputs: AnomalySignal dicts to Kafka omniwatch.anomalies.detected + ClickHouse
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -130,6 +131,30 @@ class DetectorEngine:
             self._cold_start_count,
         )
 
+    def _persist_model(self) -> None:
+        """Persist the trained detector so /health reports model_loaded.
+
+        Called exactly once, immediately after cold-start training.  The
+        artifact is written to ``settings.predictive_model_path`` (relative
+        paths resolve against the ``predictive/`` package root) so the
+        ``/health`` ``model_loaded`` glob (``predictive_root/**/*.joblib``)
+        flips to true and the model survives container restarts.
+
+        Persistence is best-effort — a failure is logged, never raised, so
+        detection is never interrupted by disk problems.
+        """
+        try:
+            model_path = self._settings.predictive_model_path
+            if not os.path.isabs(model_path):
+                model_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), model_path
+                )
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            self._detector.save_model(model_path)
+            logger.info("Persisted cold-start model to %s", model_path)
+        except Exception as exc:  # pragma: no cover - defensive only
+            logger.warning("Model persistence failed — %s", exc)
+
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
@@ -185,6 +210,7 @@ class DetectorEngine:
                     len(df),
                     len(numeric_cols),
                 )
+                self._persist_model()
 
         # ── Detect ───────────────────────────────────────────────────── #
         with self._model_lock:

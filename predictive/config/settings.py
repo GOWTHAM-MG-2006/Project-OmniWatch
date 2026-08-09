@@ -73,6 +73,14 @@ class Settings(BaseSettings):
         default=30,
         description="Minimum data points before baseline models activate",
     )
+    predictive_model_path: str = Field(
+        default="artifacts/anomaly_detector.joblib",
+        description=(
+            "File path where the trained AnomalyDetector state is persisted "
+            "(joblib). Relative paths resolve against the predictive package "
+            "root so the /health model_loaded glob finds the artifact."
+        ),
+    )
     predictive_noise_filter_window: int = Field(
         default=5,
         description="Sliding window size (samples) for noise smoothing",

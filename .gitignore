@@ -45,6 +45,9 @@ CLAUDE.md
 *.parquet
 data/
 
+# Model artifacts (runtime persist from cold-start training)
+predictive/artifacts/
+
 # Gradle / Java build
 *.class
 *.jar
