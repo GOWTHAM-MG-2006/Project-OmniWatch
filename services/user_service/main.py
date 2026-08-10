@@ -8,14 +8,14 @@ Outputs: JSON responses for user CRUD operations
 """
 
 import logging
+import sys
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-import sys
-
 from services.common.anomaly_injector import AnomalyEngine, add_routes
-from services.common.otel_setup import get_logger, init_otel
+from services.common.otel_setup import init_otel
 
 # ---------------------------------------------------------------------------
 # Logging configuration — MUST be at module level so OTel init messages are visible
@@ -36,11 +36,26 @@ init_otel("user-service")
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def lifespan(app):  # type: ignore[override]
+    """Application lifecycle — startup / shutdown.
+
+    OTel SDK is already initialised at module level before routes.py import,
+    so the module-level _meter in routes.py gets a real meter.
+    """
+    add_routes(app.router, engine)
+    logger.info("user-service started — OTel initialized, anomaly routes registered")
+    yield
+    logger.info("user-service shutting down")
+
+
 app = FastAPI(
     title="OmniWatch User Service",
     version="0.1.0",
     description="User management microservice with CRUD operations, "
     "OTel instrumentation, and anomaly injection for simulation testing.",
+    lifespan=lifespan,
 )
 
 # Allow cross-origin requests from the dashboard
@@ -64,27 +79,6 @@ logger = logging.getLogger("omniwatch.user_service")
 
 
 # ---------------------------------------------------------------------------
-# Lifespan: startup / shutdown
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup() -> None:
-    """Register anomaly injection routes.
-
-    OTel SDK is already initialised at module level before routes.py import,
-    so the module-level _meter in routes.py gets a real meter.
-    """
-    add_routes(app.router, engine)
-    logger.info("user-service started — OTel initialized, anomaly routes registered")
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    """Graceful shutdown log."""
-    logger.info("user-service shutting down")
-
-
-# ---------------------------------------------------------------------------
 # Health endpoint
 # ---------------------------------------------------------------------------
 
@@ -99,6 +93,6 @@ async def health() -> dict[str, str]:
 # Include CRUD routers (registered after startup to avoid import-time issues)
 # ---------------------------------------------------------------------------
 
-from routes import router as user_router  # noqa: E402
+from routes import router as user_router
 
 app.include_router(user_router)

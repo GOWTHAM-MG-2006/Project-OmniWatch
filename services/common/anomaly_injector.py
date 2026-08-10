@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -39,14 +38,19 @@ VALID_SCENARIOS: list[str] = [
 # Request / Response models (Pydantic v2)
 # ---------------------------------------------------------------------------
 
+
 class InjectRequest(BaseModel):
     """Body for POST /__inject/anomaly."""
+
     scenario: str = Field(..., description="Anomaly scenario to activate")
-    ttl_seconds: int = Field(default=60, ge=1, le=3600, description="Time-to-live in seconds")
+    ttl_seconds: int = Field(
+        default=60, ge=1, le=3600, description="Time-to-live in seconds"
+    )
 
 
 class ActiveAnomaly(BaseModel):
     """Single active anomaly entry returned by GET /__inject/anomaly."""
+
     scenario: str
     remaining_seconds: float
     expires_at: float
@@ -54,12 +58,14 @@ class ActiveAnomaly(BaseModel):
 
 class ActiveAnomaliesResponse(BaseModel):
     """Response for GET /__inject/anomaly."""
+
     service: str
     active: list[ActiveAnomaly]
 
 
 class InjectResponse(BaseModel):
     """Response for POST /__inject/anomaly."""
+
     status: str
     scenario: str
     ttl_seconds: int
@@ -68,6 +74,7 @@ class InjectResponse(BaseModel):
 
 class ClearResponse(BaseModel):
     """Response for DELETE operations."""
+
     status: str
     cleared: str
 
@@ -78,16 +85,20 @@ class ClearResponse(BaseModel):
 
 _SCENARIO_PAYLOADS: dict[str, dict[str, Any]] = {
     "database_cascade": {"delay_ms": 2000, "error_rate": 0.3},
-    "memory_leak":      {"extra_memory_mb": 50, "response_bloat": True},
-    "latency_spike":    {"delay_ms": 3000},
-    "security_attack":  {"block_ip": True, "log_frequency": "high"},
-    "config_drift":     {"config_version": "drifted", "features_disabled": ["cache", "rate_limit"]},
+    "memory_leak": {"extra_memory_mb": 50, "response_bloat": True},
+    "latency_spike": {"delay_ms": 3000},
+    "security_attack": {"block_ip": True, "log_frequency": "high"},
+    "config_drift": {
+        "config_version": "drifted",
+        "features_disabled": ["cache", "rate_limit"],
+    },
 }
 
 
 # ---------------------------------------------------------------------------
 # AnomalyEngine
 # ---------------------------------------------------------------------------
+
 
 class AnomalyEngine:
     """Thread-safe anomaly injection engine for a single service.
@@ -137,9 +148,7 @@ class AnomalyEngine:
         Raises ValueError for unknown scenarios.
         """
         if scenario not in VALID_SCENARIOS:
-            raise ValueError(
-                f"Unknown scenario '{scenario}'. Valid: {VALID_SCENARIOS}"
-            )
+            raise ValueError(f"Unknown scenario '{scenario}'. Valid: {VALID_SCENARIOS}")
 
         expires_at = time.time() + ttl_seconds
         with self._lock:
@@ -203,7 +212,9 @@ class AnomalyEngine:
                 )
             return result
 
-    def apply(self, scenario: str, service_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def apply(
+        self, scenario: str, service_context: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Return the observable payload for an active scenario.
 
         If the scenario is not active, returns an empty dict (no effect).
@@ -215,9 +226,14 @@ class AnomalyEngine:
         return dict(_SCENARIO_PAYLOADS.get(scenario, {}))
 
 
+# Backwards-compatible alias used by plan QA scripts and the simulation layer.
+AnomalyInjector = AnomalyEngine
+
+
 # ---------------------------------------------------------------------------
 # FastAPI router integration
 # ---------------------------------------------------------------------------
+
 
 def add_routes(router: APIRouter, engine: AnomalyEngine) -> None:
     """Register ``/__inject/anomaly`` endpoints on the given router.

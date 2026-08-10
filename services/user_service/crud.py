@@ -10,7 +10,7 @@ Outputs: User model instances
 import uuid
 from datetime import datetime, timezone
 
-from models import User, UserCreate
+from models import User, UserCreate, UserUpdate
 
 # In-memory user store: user_id -> User
 _users: dict[str, User] = {}
@@ -66,3 +66,25 @@ def delete_user(user_id: str) -> bool:
         del _users[user_id]
         return True
     return False
+
+
+def update_user(user_id: str, data: UserUpdate) -> User | None:
+    """Update a user's mutable fields (name, email) by UUID.
+
+    Only fields present in the request body are changed; the user_id and
+    created_at are never modified.
+
+    Args:
+        user_id: The user's UUID string
+        data: Update payload with optional name/email fields
+
+    Returns:
+        Updated User if found, None otherwise
+    """
+    user = _users.get(user_id)
+    if user is None:
+        return None
+    updates = data.model_dump(exclude_unset=True)
+    updated = user.model_copy(update=updates)
+    _users[user_id] = updated
+    return updated

@@ -9,7 +9,6 @@ Outputs: Order model instances
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from models import Order, OrderCreate, OrderItem
 
@@ -48,7 +47,7 @@ def create_order(data: OrderCreate) -> Order:
     return order
 
 
-def get_order(order_id: str) -> Optional[Order]:
+def get_order(order_id: str) -> Order | None:
     """Retrieve an order by its ID, or None if not found."""
     return _orders.get(order_id)
 
@@ -63,7 +62,7 @@ def list_orders_by_user(user_id: str) -> list[Order]:
     return [o for o in _orders.values() if o.user_id == user_id]
 
 
-def update_order_status(order_id: str, status: str) -> Optional[Order]:
+def update_order_status(order_id: str, status: str) -> Order | None:
     """Update the status of an existing order. Returns None if not found."""
     order = _orders.get(order_id)
     if order is None:

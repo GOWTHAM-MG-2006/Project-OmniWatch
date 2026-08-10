@@ -9,7 +9,6 @@ Outputs: Configured MeterProvider, TracerProvider, LoggerProvider instances
 
 import atexit
 import logging
-from typing import Optional
 
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
@@ -19,7 +18,7 @@ from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_NAMESPACE
+from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_NAMESPACE, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -28,9 +27,9 @@ _logger = logging.getLogger(__name__)
 
 # Module-level state tracking
 _providers_initialized: bool = False
-_meter_provider: Optional[MeterProvider] = None
-_tracer_provider: Optional[TracerProvider] = None
-_logger_provider: Optional[LoggerProvider] = None
+_meter_provider: MeterProvider | None = None
+_tracer_provider: TracerProvider | None = None
+_logger_provider: LoggerProvider | None = None
 
 
 def init_otel(
@@ -51,7 +50,9 @@ def init_otel(
     global _providers_initialized, _meter_provider, _tracer_provider, _logger_provider
 
     if _providers_initialized:
-        _logger.warning("OTel already initialized — skipping duplicate init_otel() call")
+        _logger.warning(
+            "OTel already initialized — skipping duplicate init_otel() call"
+        )
         return
 
     _logger.info(f"Initializing OTel SDK for service: {service_name}")
@@ -99,7 +100,7 @@ def init_otel(
         _providers_initialized = True
         _logger.info(f"OTel SDK fully initialized for '{service_name}'")
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — OTel SDK can raise any exception during init; must not crash service
         _logger.warning(
             f"OTel initialization failed (service={service_name}, "
             f"endpoint={otel_endpoint}): {exc}. "
@@ -158,9 +159,7 @@ def get_logger(
 
     # Attach OTel handler if provider is available and handler not already present
     if _logger_provider is not None:
-        has_otel_handler = any(
-            isinstance(h, LoggingHandler) for h in logger.handlers
-        )
+        has_otel_handler = any(isinstance(h, LoggingHandler) for h in logger.handlers)
         if not has_otel_handler:
             otel_handler = LoggingHandler(
                 level=logging.NOTSET,
@@ -189,19 +188,19 @@ def shutdown_otel() -> None:
     if _tracer_provider is not None:
         try:
             _tracer_provider.shutdown()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — shutdown guard must never crash the process
             errors.append(f"TracerProvider shutdown failed: {exc}")
 
     if _meter_provider is not None:
         try:
             _meter_provider.shutdown()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — shutdown guard must never crash the process
             errors.append(f"MeterProvider shutdown failed: {exc}")
 
     if _logger_provider is not None:
         try:
             _logger_provider.shutdown()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — shutdown guard must never crash the process
             errors.append(f"LoggerProvider shutdown failed: {exc}")
 
     if errors:
@@ -222,9 +221,7 @@ def _setup_log_handler() -> None:
     """
     root_logger = logging.getLogger()
     if _logger_provider is not None:
-        has_otel = any(
-            isinstance(h, LoggingHandler) for h in root_logger.handlers
-        )
+        has_otel = any(isinstance(h, LoggingHandler) for h in root_logger.handlers)
         if not has_otel:
             otel_handler = LoggingHandler(
                 level=logging.NOTSET,

@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-
 # =============================================================================
 # Model validation tests
 # =============================================================================
@@ -180,8 +179,8 @@ class TestOrderSaga:
 
     def test_saga_creates_confirmed_order(self, order_data):
         """create_order_saga() returns an order with 'confirmed' status."""
-        from services.order_service.saga import create_order_saga
         from services.order_service.models import OrderCreate
+        from services.order_service.saga import create_order_saga
 
         order = create_order_saga(OrderCreate(**order_data))
         assert order.id is not None
@@ -190,8 +189,8 @@ class TestOrderSaga:
 
     def test_saga_increments_order_count(self, order_data):
         """Each saga call creates a distinct order."""
-        from services.order_service.saga import create_order_saga
         from services.order_service.models import OrderCreate
+        from services.order_service.saga import create_order_saga
 
         o1 = create_order_saga(OrderCreate(**order_data))
         o2 = create_order_saga(OrderCreate(**order_data))
@@ -199,8 +198,8 @@ class TestOrderSaga:
 
     def test_saga_sets_correct_user_id(self, order_data):
         """Saga preserves the user_id from the input."""
-        from services.order_service.saga import create_order_saga
         from services.order_service.models import OrderCreate
+        from services.order_service.saga import create_order_saga
 
         order = create_order_saga(OrderCreate(**order_data))
         assert order.user_id == "user-alice-001"

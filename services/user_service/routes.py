@@ -13,11 +13,10 @@ import random
 import time
 from typing import Any
 
+from crud import create_user, delete_user, get_user, list_users, update_user
 from fastapi import APIRouter, HTTPException, Request
+from models import User, UserCreate, UserUpdate
 from opentelemetry import metrics
-
-from crud import create_user, delete_user, get_user, list_users
-from models import User, UserCreate
 
 logger = logging.getLogger("omniwatch.user_service.routes")
 
@@ -42,6 +41,7 @@ router = APIRouter(prefix="/api/v1/users")
 # ---------------------------------------------------------------------------
 # Anomaly helpers
 # ---------------------------------------------------------------------------
+
 
 async def _apply_anomaly_delay(request: Request) -> None:
     """Apply artificial delay if latency_spike anomaly is active.
@@ -135,6 +135,22 @@ async def get_user_route(request: Request, user_id: str) -> User:
         return user
     finally:
         await _record_metrics("GET", f"/api/v1/users/{user_id}", start, 200)
+
+
+@router.put("/{user_id}", response_model=User, summary="Update user by ID")
+async def update_user_route(request: Request, user_id: str, body: UserUpdate) -> User:
+    """Update a user's name and/or email by their UUID."""
+    start = time.time()
+    try:
+        await _apply_anomaly_delay(request)
+        await _maybe_raise_error(request)
+        user = update_user(user_id, body)
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        logger.info("user_updated id=%s", user_id)
+        return user
+    finally:
+        await _record_metrics("PUT", f"/api/v1/users/{user_id}", start, 200)
 
 
 @router.delete("/{user_id}", status_code=204, summary="Delete user by ID")

@@ -9,14 +9,15 @@ Outputs: JSON responses, Kafka events, OTLP telemetry
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
-from services.common.otel_setup import init_otel
-from services.common.anomaly_injector import AnomalyEngine, add_routes
 from routes import router as order_router
+
+from services.common.anomaly_injector import AnomalyEngine, add_routes
+from services.common.otel_setup import init_otel
 
 # Configure root logger
 logging.basicConfig(
@@ -37,30 +38,28 @@ init_otel("order-service")
 # Application factory
 # ---------------------------------------------------------------------------
 
-app = FastAPI(
-    title="OmniWatch Order Service",
-    version="0.1.0",
-    description="Order management microservice with saga orchestration",
-)
 
-# Anomaly engine — attached to application state for route access
-engine = AnomalyEngine(service_name="order-service")
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    """Register anomaly-injection routes.
+@asynccontextmanager
+async def lifespan(app):  # type: ignore[override]
+    """Application lifecycle — startup / shutdown.
 
     OTel SDK is already initialised at module level, so providers are ready.
     """
     add_routes(app.router, engine)
     logger.info("OmniWatch Order Service started successfully")
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    """Clean shutdown."""
+    yield
     logger.info("OmniWatch Order Service shutting down")
+
+
+app = FastAPI(
+    title="OmniWatch Order Service",
+    version="0.1.0",
+    description="Order management microservice with saga orchestration",
+    lifespan=lifespan,
+)
+
+# Anomaly engine — attached to application state for route access
+engine = AnomalyEngine(service_name="order-service")
 
 
 # ---------------------------------------------------------------------------

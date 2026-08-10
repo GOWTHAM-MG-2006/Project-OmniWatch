@@ -6,23 +6,23 @@ Purpose: FastAPI application that serves as the central API gateway — auth,
          rate limiting, OTel telemetry, anomaly injection, and proxy routing
          to downstream microservices.
 Inputs: HTTP requests (REST API)
-Outputs: Proxied responses from user-service, order-service + /health, /routes
+Outputs: Proxied responses from user-service, order-service + /health, /routes,
+         /__status (active anomalies)
 """
 
 from __future__ import annotations
 
 import logging
+import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
-
-import sys
+from middleware import AuthMiddleware, OTelMiddleware, RateLimitMiddleware
+from routes import router
 
 from services.common.anomaly_injector import AnomalyEngine, add_routes
-from services.common.otel_setup import get_logger, init_otel
-
-from middleware import AuthMiddleware, OTelMiddleware
-from routes import router
+from services.common.otel_setup import init_otel
 
 # ---------------------------------------------------------------------------
 # Logging configuration — MUST be at module level so OTel init messages are visible
@@ -44,11 +44,30 @@ init_otel("api-gateway")
 # Application factory
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def lifespan(app):  # type: ignore[override]
+    """Application lifecycle — startup / shutdown.
+
+    OTel SDK is already initialised at module level (before FastAPI app creation)
+    so the MeterProvider / TracerProvider / LoggerProvider are ready when
+    OTelMiddleware instruments are constructed.
+    """
+    logger.info("API Gateway started — title=%s version=%s", app.title, app.version)
+    yield
+    # Shutdown: gracefully shut down OTel providers
+    from services.common.otel_setup import shutdown_otel
+
+    logger.info("API Gateway shutting down")
+    shutdown_otel()
+
+
 app = FastAPI(
     title="OmniWatch API Gateway",
     version="0.1.0",
     description="Central API gateway for OmniWatch microservices — handles auth, "
     "telemetry, rate limiting, and request routing.",
+    lifespan=lifespan,
 )
 
 # -- Anomaly injection engine (simulation layer) --
@@ -56,11 +75,17 @@ app = FastAPI(
 engine = AnomalyEngine(service_name="api-gateway")
 add_routes(app.router, engine)
 
-# -- Middleware stack (order matters: Auth runs before OTel metrics) --
+# -- Middleware stack (execution order: OTel → RateLimit → Auth) --
+# Starlette wraps add_middleware calls in reverse, so the LAST added middleware
+# executes FIRST. Registration order here:
+#   1. OTelMiddleware   (added last → runs first: records metrics for all requests)
+#   2. RateLimitMiddleware (added second → runs second: rate-limits all traffic)
+#   3. AuthMiddleware    (added first → runs last: validates Bearer token on protected routes)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(OTelMiddleware)
 
-# -- Include placeholder routes --
+# -- Include routes (proxy + metadata) --
 app.include_router(router)
 
 # -- Logger (immediately available; OTel handler attached after init_otel) --
@@ -68,32 +93,9 @@ logger = logging.getLogger("omniwatch.api_gateway")
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle hooks
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    """Log startup confirmation.
-
-    OTel SDK is already initialised at module level (before FastAPI app creation)
-    so the MeterProvider / TracerProvider / LoggerProvider are ready when
-    OTelMiddleware instruments are constructed.
-    """
-    logger.info("API Gateway started — title=%s version=%s", app.title, app.version)
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    """Cleanup hook — gracefully shut down OTel providers."""
-    from services.common.otel_setup import shutdown_otel
-
-    logger.info("API Gateway shutting down")
-    shutdown_otel()
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get(
     "/health",
@@ -106,23 +108,24 @@ def health_check() -> dict:
     return {"status": "healthy", "service": "api-gateway"}
 
 
-# ---------------------------------------------------------------------------
-# Phase 1 placeholders — real proxy routing comes in later phases
-# ---------------------------------------------------------------------------
+@app.get(
+    "/__status",
+    tags=["gateway"],
+    summary="Active anomaly status",
+    description="Returns the list of currently active anomaly injections on this service. "
+    "Simulation-only endpoint — public (no auth required).",
+)
+def status_check() -> dict:
+    """Return active anomalies from the AnomalyEngine.
 
-# TODO (Phase 2): Proxy /users/* routes to user-service
-#   - GET  /users/           → user-service.list_users()
-#   - GET  /users/{id}       → user-service.get_user()
-#   - POST /users/           → user-service.create_user()
-#
-# TODO (Phase 2): Proxy /orders/* routes to order-service
-#   - GET  /orders/          → order-service.list_orders()
-#   - GET  /orders/{id}      → order-service.get_order()
-#   - POST /orders/          → order-service.create_order()
-#
-# TODO (Phase 3): Rate limiting via sliding-window counter (in-memory)
-#
-# TODO (Phase 3): Request validation / schema enforcement
+    Lists all currently-injected anomaly scenarios with their remaining TTL.
+    This endpoint is public (no auth required) for simulation and debugging.
+    """
+    active = engine.get_active()
+    return {
+        "active_anomalies": active,
+        "service": "api-gateway",
+    }
 
 
 # ---------------------------------------------------------------------------

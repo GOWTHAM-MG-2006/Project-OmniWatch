@@ -1,11 +1,4 @@
 [tool.pytest.ini_options]
 filterwarnings = [
-    # CRITICAL GATE: Turn all DeprecationWarnings into errors.
-    # Ensures our code never uses deprecated APIs.
     "error::DeprecationWarning",
-    # Known library issue: pytest-asyncio 1.3.0 on Python 3.14 imports
-    # asyncio.AbstractEventLoopPolicy which is deprecated (slated for 3.16).
-    # The warning is attributed to importlib._bootstrap by stacklevel=3,
-    # but module=asyncio matches it in pytest's filter system.
-    "ignore::DeprecationWarning:asyncio",
 ]

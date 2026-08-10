@@ -8,16 +8,18 @@ Outputs: JSON responses with Order data
 """
 
 import logging
+import os
 import random
 import time
 
+import httpx
+from crud import get_order, list_orders, list_orders_by_user
 from fastapi import APIRouter, Depends, HTTPException, Request
+from models import Order, OrderCreate
+from saga import create_order_saga
 
 from services.common.anomaly_injector import AnomalyEngine
 from services.common.otel_setup import get_meter
-from models import Order, OrderCreate
-from crud import get_order, list_orders, list_orders_by_user
-from saga import create_order_saga
 
 logger = logging.getLogger("omniwatch.order_service.routes")
 
@@ -102,22 +104,58 @@ def _check_anomaly(engine: AnomalyEngine) -> None:
 
 
 # ---------------------------------------------------------------------------
+# User validation helper
+# ---------------------------------------------------------------------------
+
+_USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://user-service:8001")
+
+
+async def _validate_user_exists(user_id: str) -> None:
+    """Verify the user exists via user-service before creating an order.
+
+    Calls ``GET {USER_SERVICE_URL}/users/{user_id}`` with a short timeout.
+    A 404 means the user is unknown (400), an unreachable user-service
+    means the order cannot be validated (503).
+    """
+    url = f"{_USER_SERVICE_URL}/api/v1/users/{user_id}"
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(url)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.error("User-service unreachable at %s: %s", _USER_SERVICE_URL, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="user service unavailable",
+        ) from exc
+
+    if response.status_code == 404:
+        logger.warning("Rejecting order for unknown user_id=%s", user_id)
+        raise HTTPException(status_code=400, detail="user not found")
+
+    response.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=Order, summary="Create a new order")
-def create_order_endpoint(
+async def create_order_endpoint(
     data: OrderCreate,
-    engine: AnomalyEngine = Depends(_get_engine),
+    engine: AnomalyEngine = Depends(_get_engine),  # noqa: B008 — FastAPI DI idiom
 ) -> Order:
     """Create an order via saga orchestration.
 
-    The saga persists the order locally, publishes a ``order.created``
-    event to Kafka, and transitions the status to ``confirmed``.
+    The user_id is first validated against user-service (404 -> 400,
+    unreachable -> 503). The saga then persists the order locally,
+    publishes a ``order.created`` event to Kafka, and transitions the
+    status to ``confirmed``.
     """
     start = time.time()
     _check_anomaly(engine)
+
+    await _validate_user_exists(data.user_id)
 
     order = create_order_saga(data)
 
@@ -140,7 +178,7 @@ def create_order_endpoint(
 
 
 @router.get("", response_model=list[Order], summary="List all orders")
-def list_orders_endpoint(engine: AnomalyEngine = Depends(_get_engine)) -> list[Order]:
+def list_orders_endpoint(engine: AnomalyEngine = Depends(_get_engine)) -> list[Order]:  # noqa: B008 — FastAPI DI idiom
     """Return every order currently stored in memory."""
     start = time.time()
     _check_anomaly(engine)
@@ -166,7 +204,10 @@ def list_orders_endpoint(engine: AnomalyEngine = Depends(_get_engine)) -> list[O
 
 
 @router.get("/{order_id}", response_model=Order, summary="Get order by ID")
-def get_order_endpoint(order_id: str, engine: AnomalyEngine = Depends(_get_engine)) -> Order:
+def get_order_endpoint(
+    order_id: str,
+    engine: AnomalyEngine = Depends(_get_engine),  # noqa: B008 — FastAPI DI idiom
+) -> Order:
     """Retrieve a single order by its unique identifier."""
     start = time.time()
     _check_anomaly(engine)
@@ -198,7 +239,10 @@ def get_order_endpoint(order_id: str, engine: AnomalyEngine = Depends(_get_engin
     response_model=list[Order],
     summary="List orders by user",
 )
-def list_user_orders_endpoint(user_id: str, engine: AnomalyEngine = Depends(_get_engine)) -> list[Order]:
+def list_user_orders_endpoint(
+    user_id: str,
+    engine: AnomalyEngine = Depends(_get_engine),  # noqa: B008 — FastAPI DI idiom
+) -> list[Order]:
     """Return all orders placed by a specific user."""
     start = time.time()
     _check_anomaly(engine)

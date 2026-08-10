@@ -39,9 +39,9 @@ def _load_service_app(service_name: str):
     """
     for mod_name in list(sys.modules):
         parts = mod_name.split(".")
-        if len(parts) == 1 and parts[0] in _FLAT_MODULES:
-            del sys.modules[mod_name]
-        elif len(parts) >= 2 and parts[0] == "services" and parts[1] in _SERVICE_PKGS:
+        if (len(parts) == 1 and parts[0] in _FLAT_MODULES) or (
+            len(parts) >= 2 and parts[0] == "services" and parts[1] in _SERVICE_PKGS
+        ):
             del sys.modules[mod_name]
 
     svc_dir = str(PROJECT_ROOT / "services" / service_name)
@@ -87,9 +87,9 @@ def _service_path(request):
     # pick up the right files from the dir we are about to expose.
     for mod_name in list(sys.modules):
         parts = mod_name.split(".")
-        if len(parts) == 1 and parts[0] in _FLAT_MODULES:
-            del sys.modules[mod_name]
-        elif len(parts) >= 2 and parts[0] == "services" and parts[1] in _SERVICE_PKGS:
+        if (len(parts) == 1 and parts[0] in _FLAT_MODULES) or (
+            len(parts) >= 2 and parts[0] == "services" and parts[1] in _SERVICE_PKGS
+        ):
             del sys.modules[mod_name]
 
     svc_dir = str(PROJECT_ROOT / "services" / service_name)
@@ -210,7 +210,26 @@ def user_client():
 @pytest.fixture(scope="function")
 def order_client():
     from fastapi.testclient import TestClient
-    with TestClient(_load_service_app("order_service")) as client:
+
+    app = _load_service_app("order_service")
+
+    async def _fake_validate_user_exists(*args, **kwargs) -> None:
+        """Test stub — user-service is not reachable in unit tests.
+
+        ``_validate_user_exists`` performs an httpx GET to
+        ``http://user-service:8001`` (the Docker network name), which does
+        not resolve from the host where pytest runs. Stub it out so order
+        route tests exercise the saga without a live user-service.
+        """
+        return
+
+    with (
+        patch(
+            "routes._validate_user_exists",
+            _fake_validate_user_exists,
+        ),
+        TestClient(app) as client,
+    ):
         yield client
 
 

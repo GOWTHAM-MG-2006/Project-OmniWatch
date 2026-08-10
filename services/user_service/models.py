@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 class User(BaseModel):
     """Complete user record returned by the API."""
+
     id: str
     name: str
     email: str
@@ -20,5 +21,13 @@ class User(BaseModel):
 
 class UserCreate(BaseModel):
     """Request model for creating a new user."""
+
     name: str
     email: str
+
+
+class UserUpdate(BaseModel):
+    """Request model for updating an existing user (all fields optional)."""
+
+    name: str | None = None
+    email: str | None = None

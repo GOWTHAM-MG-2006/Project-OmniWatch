@@ -10,9 +10,9 @@ Outputs: Confirmed Order (or order stuck at "pending" on error)
 
 import logging
 
-from models import Order, OrderCreate
 from crud import create_order, update_order_status
 from kafka_client import get_default_producer
+from models import Order, OrderCreate
 
 logger = logging.getLogger("omniwatch.order_service.saga")
 

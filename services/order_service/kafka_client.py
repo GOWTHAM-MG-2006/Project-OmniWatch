@@ -9,7 +9,7 @@ Outputs: Kafka produce call with graceful failure handling
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("omniwatch.order_service.kafka")
 
@@ -36,7 +36,10 @@ class KafkaProducer:
             from confluent_kafka import Producer
 
             self._producer = Producer(
-                {"bootstrap.servers": self.bootstrap_servers, "client.id": "order-service"}
+                {
+                    "bootstrap.servers": self.bootstrap_servers,
+                    "client.id": "order-service",
+                }
             )
             # Force a metadata call to verify connectivity
             self._producer.list_topics(timeout=3.0)
@@ -45,10 +48,9 @@ class KafkaProducer:
                 "KafkaProducer connected to %s",
                 self.bootstrap_servers,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — Kafka errors must not crash the service; log-and-continue
             logger.warning(
-                "KafkaProducer connection failed (%s) — "
-                "continuing without Kafka: %s",
+                "KafkaProducer connection failed (%s) — continuing without Kafka: %s",
                 self.bootstrap_servers,
                 exc,
             )
@@ -80,7 +82,7 @@ class KafkaProducer:
                 callback=self._delivery_report,
             )
             self._producer.poll(0)  # Trigger delivery callbacks
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — Kafka produce errors must not crash the service
             logger.warning(
                 "Failed to publish event topic=%s key=%s: %s",
                 topic,
@@ -93,11 +95,11 @@ class KafkaProducer:
         if self._producer is not None:
             try:
                 self._producer.flush(timeout)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — flush guard must not crash during shutdown
                 logger.warning("Kafka flush failed: %s", exc)
 
     @staticmethod
-    def _delivery_report(err: Optional[Any], msg: Any) -> None:
+    def _delivery_report(err: Any | None, msg: Any) -> None:
         """Callback invoked by confluent-kafka after produce attempt."""
         if err is not None:
             logger.warning("Kafka delivery failed: %s", err)
@@ -110,7 +112,7 @@ class KafkaProducer:
 
 
 # Module-level singleton for convenience
-_default_producer: Optional[KafkaProducer] = None
+_default_producer: KafkaProducer | None = None
 
 
 def get_default_producer() -> KafkaProducer:
