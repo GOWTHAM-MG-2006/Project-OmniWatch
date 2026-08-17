@@ -122,6 +122,12 @@ public class EntityConfig implements Serializable {
     private final Map<String, Map<String, String>> tagsByType;
     private final List<TagRule> tagRules;
 
+    /** MinIO connection settings — loaded from environment variables with safe defaults. */
+    private final String minioEndpoint;
+    private final String minioAccessKey;
+    private final String minioSecretKey;
+    private final String minioBucket;
+
     private EntityConfig(List<ProviderMapping> mappings,
                          Map<String, String> defaultTags,
                          Map<String, Map<String, String>> tagsByType,
@@ -130,6 +136,10 @@ public class EntityConfig implements Serializable {
         this.defaultTags = defaultTags == null ? Collections.emptyMap() : defaultTags;
         this.tagsByType = tagsByType == null ? Collections.emptyMap() : tagsByType;
         this.tagRules = tagRules == null ? Collections.emptyList() : tagRules;
+        this.minioEndpoint = System.getenv().getOrDefault("MINIO_ENDPOINT", "http://minio:9010");
+        this.minioAccessKey = System.getenv().getOrDefault("MINIO_ACCESS_KEY", "minioadmin");
+        this.minioSecretKey = System.getenv().getOrDefault("MINIO_SECRET_KEY", "minioadmin");
+        this.minioBucket = System.getenv().getOrDefault("MINIO_BUCKET", "omniwatch-telemetry-archive");
     }
 
     /** Loads both YAML configs from the classpath resources. */
@@ -267,5 +277,21 @@ public class EntityConfig implements Serializable {
 
     public List<TagRule> getTagRules() {
         return tagRules;
+    }
+
+    public String getMinioEndpoint() {
+        return minioEndpoint;
+    }
+
+    public String getMinioAccessKey() {
+        return minioAccessKey;
+    }
+
+    public String getMinioSecretKey() {
+        return minioSecretKey;
+    }
+
+    public String getMinioBucket() {
+        return minioBucket;
     }
 }

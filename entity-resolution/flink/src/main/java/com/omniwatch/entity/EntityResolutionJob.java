@@ -25,6 +25,7 @@ import com.omniwatch.entity.operators.EntityDeduplicator;
 import com.omniwatch.entity.operators.EntityEnricher;
 import com.omniwatch.entity.operators.RelationshipBuilder;
 import com.omniwatch.entity.operators.ResourceIdParser;
+import com.omniwatch.entity.sink.EntityMinIOSink;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.Types;
@@ -100,16 +101,24 @@ public final class EntityResolutionJob {
                 .returns(Types.POJO(TelemetryEvent.class));
 
         // ---- Branch A: entity resolution pipeline ----
-        events
+        DataStream<UnifiedEntity> resolvedEntities = events
                 .map(new ResourceIdParser(entityConfig))
                 .map(new CloudProviderMapper())
                 .map(new EntityEnricher(entityConfig))
                 .keyBy(UnifiedEntity::getEntityId)
-                .process(new EntityDeduplicator())
+                .process(new EntityDeduplicator());
+
+        resolvedEntities
                 .map(entity -> serialize(mapper, entity))
                 .returns(Types.STRING)
                 .sinkTo(createSink(config.kafkaBrokers, OUTPUT_TOPIC_RESOLVED))
                 .name("sink-entities-resolved");
+
+        resolvedEntities
+                .map(entity -> serialize(mapper, entity))
+                .returns(Types.STRING)
+                .addSink(new EntityMinIOSink(entityConfig))
+                .name("sink-entities-minio");
 
         // ---- Branch B: relationship pipeline (trace spans) ----
         events

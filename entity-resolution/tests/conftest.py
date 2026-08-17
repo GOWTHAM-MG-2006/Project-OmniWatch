@@ -12,6 +12,7 @@ from typing import Optional
 
 import pytest
 import requests
+from minio import Minio
 
 
 def _json_codec():
@@ -96,6 +97,17 @@ def kafka_producer():
     )
     yield producer
     producer.close()
+
+
+@pytest.fixture(scope="session")
+def minio_client():
+    """MinIO client for bucket verification (mirrors Phase 2 conftest)."""
+    return Minio(
+        "localhost:9010",
+        access_key="minioadmin",
+        secret_key="minioadmin",
+        secure=False,
+    )
 
 
 @pytest.fixture

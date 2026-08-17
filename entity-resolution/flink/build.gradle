@@ -54,6 +54,12 @@ dependencies {
     // MinIO sink for resolved entity snapshots
     implementation 'io.minio:minio:8.5.7'
 
+    // Parquet + Avro for MinIO entity archival (REAL parquet, not JSONL)
+    implementation 'org.apache.flink:flink-parquet:1.17.2'
+    implementation 'org.apache.hadoop:hadoop-common:3.3.6'
+    implementation 'org.apache.hadoop:hadoop-mapreduce-client-core:3.3.6'
+    implementation 'org.apache.parquet:parquet-avro:1.13.1'
+
     // YAML config parsing for entity mappings and business tags
     implementation 'org.yaml:snakeyaml:2.2'
 

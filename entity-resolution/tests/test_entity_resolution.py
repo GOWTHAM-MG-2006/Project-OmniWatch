@@ -297,3 +297,27 @@ def test_job_running_after_processing(kafka_producer, test_group_id, unique_id):
     from conftest import wait_for_output
     result = wait_for_output(TOPIC_RESOLVED, test_group_id, canonical, timeout=20)
     assert result is not None, "Entity should be resolved in output topic"
+
+
+# --------------------------------------------------------------------------- #
+# Test 5.2 — MinIO sink receives Parquet files
+# --------------------------------------------------------------------------- #
+def test_minio_sink_receives_parquet_files(minio_client):
+    """MinIO bucket contains resolved entity parquet files under entity-resolution/ prefix."""
+    bucket = "omniwatch-telemetry-archive"
+    prefix = "entity-resolution/"
+
+    objects = []
+    for _ in range(12):
+        objects = list(minio_client.list_objects(bucket, prefix=prefix, recursive=True))
+        if objects:
+            break
+        time.sleep(5)
+
+    assert len(objects) >= 1, (
+        f"Expected at least 1 parquet file in {bucket}/{prefix}, found {len(objects)}"
+    )
+    parquet_files = [o for o in objects if o.object_name.endswith(".parquet")]
+    assert len(parquet_files) >= 1, (
+        f"Expected .parquet files, found: {[o.object_name for o in objects]}"
+    )

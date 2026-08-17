@@ -49,6 +49,28 @@ omniwatch.{metrics,logs,traces,events,security}.normalized
 - **Outputs (Kafka):**
   - `omniwatch.entities.resolved` — `UnifiedEntity` JSON
   - `omniwatch.entities.relationships` — `EntityRelationship` JSON (CALLS)
+- **Outputs (MinIO):**
+  - `omniwatch-telemetry-archive/entity-resolution/dt=YYYY-MM-DD-HH/entities-*.parquet`
+
+## MinIO Output
+
+The `EntityMinIOSink` buffers resolved entity records and periodically flushes
+them as Parquet files to the `omniwatch-telemetry-archive` bucket.
+
+| Setting | Value |
+|---------|-------|
+| Bucket | `omniwatch-telemetry-archive` |
+| Prefix | `entity-resolution/` |
+| Partitioning | `dt=yyyy-MM-dd-HH` (Hive-style, hour-level) |
+| Format | Apache Parquet (Avro schema) |
+| Object naming | `entities-{yyyyMMdd-HHmmss}-{uuid8}.parquet` |
+| Batch size | 100 records |
+| Flush interval | 5 seconds (or batch full, whichever first) |
+
+Parquet schema fields: `entity_id` (string), `entity_type` (string),
+`provider` (string), `region` (string), `name` (string),
+`business_tags` (string, JSON), `raw_identifiers` (string, JSON),
+`first_seen` (long), `last_seen` (long).
 
 ## Config
 
@@ -56,6 +78,10 @@ omniwatch.{metrics,logs,traces,events,security}.normalized
 |-----|---------|---------|
 | `kafka.brokers` | `KAFKA_BOOTSTRAP_SERVERS` | `kafka:29092` |
 | `kafka.group.id` | `KAFKA_GROUP_ID` | `flink-entity-resolution` |
+| `minio.endpoint` | `MINIO_ENDPOINT` | `http://minio:9010` |
+| `minio.access.key` | `MINIO_ACCESS_KEY` | `minioadmin` |
+| `minio.secret.key` | `MINIO_SECRET_KEY` | `minioadmin` |
+| `minio.bucket` | `MINIO_BUCKET` | `omniwatch-telemetry-archive` |
 
 Resource extraction patterns: `src/main/resources/entity_mappings.yaml`
 Business tag rules: `src/main/resources/business_tags.yaml`
