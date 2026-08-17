@@ -24,12 +24,12 @@ def _json_codec():
     from kafka.serializer.abstract import Serializer as KSerializer
 
     class _JsonCodec(KSerializer, KDeserializer):
-        def serialize(self, topic, data, *args) -> Any:
+        def serialize(self, topic, headers, data) -> Any:
             if data is None:
                 return None
             return json.dumps(data).encode("utf-8")
 
-        def deserialize(self, topic, data, *args) -> Any:
+        def deserialize(self, topic, headers, data) -> Any:
             if data is None:
                 return None
             return json.loads(data.decode("utf-8"))
