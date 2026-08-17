@@ -24,12 +24,12 @@ def _json_codec():
     from kafka.serializer.abstract import Serializer as KSerializer
 
     class _JsonCodec(KSerializer, KDeserializer):
-        def serialize(self, topic, headers, data) -> Any:
+        def serialize(self, topic, data, *args) -> Any:
             if data is None:
                 return None
             return json.dumps(data).encode("utf-8")
 
-        def deserialize(self, topic, headers, data) -> Any:
+        def deserialize(self, topic, data, *args) -> Any:
             if data is None:
                 return None
             return json.loads(data.decode("utf-8"))
@@ -140,24 +140,28 @@ def sample_trace_payload():
     """Return sample OTel trace JSON payload."""
     now = int(time.time() * 1e9)
     return {
-        "resource": {
-            "attributes": [
-                {"key": "service.name", "value": {"stringValue": "api-gateway"}},
-            ]
-        },
-        "scopeSpans": [
+        "resourceSpans": [
             {
-                "scope": {"name": "test-tracer"},
-                "spans": [
+                "resource": {
+                    "attributes": [
+                        {"key": "service.name", "value": {"stringValue": "api-gateway"}},
+                    ]
+                },
+                "scopeSpans": [
                     {
-                        "traceId": "abc123def456abc123def456abc123de",
-                        "spanId": "span001hex",
-                        "parentSpanId": "parent000",
-                        "name": "POST /api/orders",
-                        "kind": 2,
-                        "startTimeUnixNano": str(now),
-                        "endTimeUnixNano": str(now + 50_000_000),
-                        "status": {"code": 1},
+                        "scope": {"name": "test-tracer"},
+                        "spans": [
+                            {
+                                "traceId": "abc123def456abc123def456abc123de",
+                                "spanId": "span001hex",
+                                "parentSpanId": "parent000",
+                                "name": "POST /api/orders",
+                                "kind": 2,
+                                "startTimeUnixNano": str(now),
+                                "endTimeUnixNano": str(now + 50_000_000),
+                                "status": {"code": 1},
+                            }
+                        ],
                     }
                 ],
             }

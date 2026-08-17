@@ -3,6 +3,9 @@ package com.omniwatch.flink.config;
 import org.apache.flink.api.java.utils.ParameterTool;
 
 import java.io.Serializable;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Central configuration for the OmniWatch Flink ingestion job.
@@ -12,6 +15,21 @@ import java.io.Serializable;
 public class FlinkConfig implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Allowlisted CLI keys that FlinkConfig understands. Any other --key
+     * argument is rejected up front so that typos (e.g. --minio.access.key
+     * instead of --minio.access-key) fail fast instead of being silently
+     * ignored and letting the job hang on unreachable brokers.
+     */
+    private static final Set<String> KNOWN_KEYS = new HashSet<>(Arrays.asList(
+            "kafka.brokers",
+            "kafka.group.id",
+            "minio.endpoint",
+            "minio.access-key",
+            "minio.secret-key",
+            "minio.bucket",
+            "auto.offset.reset"));
 
     private final String kafkaBrokers;
     private final String kafkaGroupId;
@@ -42,6 +60,8 @@ public class FlinkConfig implements Serializable {
      * 3. Hard-coded defaults
      */
     public static FlinkConfig fromArgs(String[] args) {
+        validateCliKeys(args);
+
         ParameterTool params = ParameterTool.fromArgs(args)
                 .mergeWith(ParameterTool.fromSystemProperties());
 
@@ -77,6 +97,32 @@ public class FlinkConfig implements Serializable {
                 kafkaBrokers, kafkaGroupId,
                 minioEndpoint, minioAccessKey, minioSecretKey,
                 minioBucket, autoOffsetReset);
+    }
+
+    /**
+     * Rejects any --key CLI argument that is not in the allowlist.
+     * ParameterTool.fromArgs silently ignores unknown keys, which previously
+     * let a typo'd flag reach env.execute() and hang forever retrying
+     * unreachable brokers. Both --key=value and --key value forms are checked.
+     */
+    private static void validateCliKeys(String[] args) {
+        if (args == null) {
+            return;
+        }
+        for (String arg : args) {
+            if (arg == null || !arg.startsWith("--")) {
+                continue;
+            }
+            String key = arg.substring(2);
+            int equalsIndex = key.indexOf('=');
+            if (equalsIndex >= 0) {
+                key = key.substring(0, equalsIndex);
+            }
+            if (!KNOWN_KEYS.contains(key)) {
+                throw new IllegalArgumentException(
+                        "Unknown configuration parameter: --" + key);
+            }
+        }
     }
 
     public String getKafkaBrokers() {

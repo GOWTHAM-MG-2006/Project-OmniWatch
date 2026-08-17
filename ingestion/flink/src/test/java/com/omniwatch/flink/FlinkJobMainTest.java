@@ -28,8 +28,8 @@ class FlinkJobMainTest {
                 "--kafka.brokers", "localhost:9092",
                 "--kafka.group.id", "test-group",
                 "--minio.endpoint", "http://localhost:9000",
-                "--minio.access.key", "test",
-                "--minio.secret.key", "test123"
+                "--minio.access-key", "test",
+                "--minio.secret-key", "test123"
         });
         assertEquals("localhost:9092", config.getKafkaBrokers());
         assertEquals("test-group", config.getKafkaGroupId());
