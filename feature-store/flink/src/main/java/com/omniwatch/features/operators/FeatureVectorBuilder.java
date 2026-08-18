@@ -138,6 +138,7 @@ public class FeatureVectorBuilder
             agg = new double[STATE_SIZE];
             agg[IDX_MIN] = Double.MAX_VALUE;
             agg[IDX_MAX] = Double.NEGATIVE_INFINITY;
+            agg[IDX_WINDOW_START] = Long.MAX_VALUE;
         }
 
         // --- 2. Merge latency percentiles (latest value wins) ---
@@ -160,17 +161,9 @@ public class FeatureVectorBuilder
         // --- 5. Merge request volume (sum of counts) ---
         agg[IDX_TOTAL_COUNT] += wf.getCount();
 
-        // --- 6. Merge window bounds (latest start, latest end) ---
-        // Advance window_start forward on every incoming window so the emitted
-        // FeatureVector always describes the most recent window. The previous
-        // earliest-start preserve kept rolling vectors frozen on the first
-        // observed window, stalling downstream consumers.
-        if (agg[IDX_WINDOW_START] == 0 || wf.getWindowStart() > agg[IDX_WINDOW_START]) {
-            agg[IDX_WINDOW_START] = wf.getWindowStart();
-        }
-        if (wf.getWindowEnd() > agg[IDX_WINDOW_END]) {
-            agg[IDX_WINDOW_END] = wf.getWindowEnd();
-        }
+        // --- 6. Merge window bounds (earliest start, latest end) ---
+        agg[IDX_WINDOW_START] = Math.min(agg[IDX_WINDOW_START], wf.getWindowStart());
+        agg[IDX_WINDOW_END] = Math.max(agg[IDX_WINDOW_END], wf.getWindowEnd());
 
         map.put(windowSize, agg);
         aggState.update(map);

@@ -4,8 +4,8 @@
  * Phase: 4
  * Purpose: POJO representing a normalized metrics event consumed from the
  *          omniwatch.metrics.normalized Kafka topic. Parsed from JSON via
- *          Jackson with LOWER_CAMEL_CASE naming strategy (matches the camelCase
- *          JSON produced by the Phase 2 ingestion normalizer).
+ *          Jackson with SNAKE_CASE naming strategy (matches the snake_case
+ *          JSON contract: entity_id, metric_name, source_type).
  * Inputs: Kafka topic omniwatch.metrics.normalized (JSON)
  * Outputs: TumblingWindowAggregator / SlidingWindowAggregator / SessionWindowDetector
  */
@@ -16,8 +16,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Normalized metrics event. Fields mirror the Kafka JSON payload
- * (camelCase keys: entityId, metricName, value, timestamp, is_error,
- * sourceType). Jackson's {@code LOWER_CAMEL_CASE} naming strategy handles
+ * (snake_case keys: entity_id, metric_name, value, timestamp, is_error,
+ * source_type). Jackson's {@code SNAKE_CASE} naming strategy handles
  * the mapping to Java camelCase getters/setters.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
