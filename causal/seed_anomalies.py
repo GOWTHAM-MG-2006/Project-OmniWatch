@@ -8,7 +8,6 @@ Inputs: none
 Outputs: omniwatch.anomalies.detected (Kafka)
 """
 import json
-import time
 from datetime import datetime, timezone
 
 from kafka import KafkaProducer
