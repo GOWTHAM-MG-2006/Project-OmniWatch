@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Optional
+from typing import Any
 
 from prioritization.models import IncidentRecord
 from storage.common import create_logger
@@ -69,10 +69,7 @@ class DeduplicationEngine:
     def _evict_expired(self) -> None:
         """Remove all expired entries from the cache (caller must hold _lock)."""
         now = time.monotonic()
-        expired = [
-            key for key, (ts, _) in self._cache.items()
-            if now - ts > self._ttl
-        ]
+        expired = [key for key, (ts, _) in self._cache.items() if now - ts > self._ttl]
         for key in expired:
             del self._cache[key]
         if expired:
@@ -144,7 +141,13 @@ class DeduplicationEngine:
         """
         # Build the merged related_anomalies list
         related = list(existing.related_anomalies)
-        incoming_rc = incoming.root_cause.model_dump() if hasattr(incoming.root_cause, "model_dump") else dict(incoming.root_cause) if isinstance(incoming.root_cause, dict) else {}
+        incoming_rc = (
+            incoming.root_cause.model_dump()
+            if hasattr(incoming.root_cause, "model_dump")
+            else dict(incoming.root_cause)
+            if isinstance(incoming.root_cause, dict)
+            else {}
+        )
         related.append(incoming_rc)
 
         # Keep the higher impact score

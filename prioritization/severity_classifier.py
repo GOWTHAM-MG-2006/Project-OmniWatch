@@ -93,17 +93,38 @@ class SeverityClassifier:
 
         # P1: ALL conditions must be true (AND)
         p1 = self._rules.get("p1", {})
-        if p1 and self._match_all(p1.get("conditions", []), rc, confidence_100, anomaly_score, impacted_count, entity_type):
+        if p1 and self._match_all(
+            p1.get("conditions", []),
+            rc,
+            confidence_100,
+            anomaly_score,
+            impacted_count,
+            entity_type,
+        ):
             return "P1"
 
         # P2: ANY condition must be true (OR)
         p2 = self._rules.get("p2", {})
-        if p2 and self._match_any(p2.get("conditions_any", []), rc, confidence_100, anomaly_score, impacted_count, entity_type):
+        if p2 and self._match_any(
+            p2.get("conditions_any", []),
+            rc,
+            confidence_100,
+            anomaly_score,
+            impacted_count,
+            entity_type,
+        ):
             return "P2"
 
         # P3: ANY condition must be true (OR)
         p3 = self._rules.get("p3", {})
-        if p3 and self._match_any(p3.get("conditions_any", []), rc, confidence_100, anomaly_score, impacted_count, entity_type):
+        if p3 and self._match_any(
+            p3.get("conditions_any", []),
+            rc,
+            confidence_100,
+            anomaly_score,
+            impacted_count,
+            entity_type,
+        ):
             return "P3"
 
         # P4: catch-all
@@ -120,7 +141,9 @@ class SeverityClassifier:
     ) -> bool:
         """ALL conditions must match (AND logic)."""
         for cond in conditions:
-            if not self._match_condition(cond, rc, confidence_100, anomaly_score, impacted_count, entity_type):
+            if not self._match_condition(
+                cond, rc, confidence_100, anomaly_score, impacted_count, entity_type
+            ):
                 return False
         return True
 
@@ -135,7 +158,9 @@ class SeverityClassifier:
     ) -> bool:
         """ANY condition must match (OR logic)."""
         for cond in conditions:
-            if self._match_condition(cond, rc, confidence_100, anomaly_score, impacted_count, entity_type):
+            if self._match_condition(
+                cond, rc, confidence_100, anomaly_score, impacted_count, entity_type
+            ):
                 return True
         return False
 
@@ -163,7 +188,11 @@ class SeverityClassifier:
             return anomaly_score >= float(threshold)
         if "impacted_count_gte" in cond:
             return impacted_count >= cond["impacted_count_gte"]
-        if "conditions" in cond and isinstance(cond["conditions"], str) and cond["conditions"] == "else":
+        if (
+            "conditions" in cond
+            and isinstance(cond["conditions"], str)
+            and cond["conditions"] == "else"
+        ):
             return True
         _LOG.warning("unknown condition key in rule: %s", list(cond.keys()))
         return False

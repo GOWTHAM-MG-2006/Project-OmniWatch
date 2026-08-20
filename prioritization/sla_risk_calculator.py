@@ -11,7 +11,6 @@ Outputs: SLA risk string: "HIGH", "MEDIUM", or "LOW"
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from storage.common import create_logger
 

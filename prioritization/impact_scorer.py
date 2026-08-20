@@ -43,7 +43,9 @@ class ImpactScorer:
     def severity_bonus(self) -> dict[str, float]:
         return dict(self._severity_bonus)
 
-    def score(self, root_cause: RootCauseObject | dict[str, Any], severity: str) -> float:
+    def score(
+        self, root_cause: RootCauseObject | dict[str, Any], severity: str
+    ) -> float:
         """Compute business impact score in [0.0, 100.0].
 
         Components (per phase 8 build plan):
@@ -78,7 +80,9 @@ class ImpactScorer:
             fault_depth_component = 0.0
 
         evidence = rc.get("evidence", {})
-        log_snippets = evidence.get("log_snippets", []) if isinstance(evidence, dict) else []
+        log_snippets = (
+            evidence.get("log_snippets", []) if isinstance(evidence, dict) else []
+        )
         if isinstance(log_snippets, list):
             evidence_component = min(5.0, len(log_snippets) * 1.0)
         else:

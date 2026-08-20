@@ -71,14 +71,16 @@ class TestPhase2E2E:
         assert len(running) >= 1, "No RUNNING Flink jobs found"
 
     def test_normalized_metric_topic_has_data(self, flink_rest_api):
-        """Flink has consumed from raw and produced to normalized topic."""
+        """Flink has consumed from raw and produced to normalized topic (anomaly signals)."""
         from conftest import kafka_consume_one
         msg = kafka_consume_one("omniwatch.metrics.normalized", timeout=30)
         assert msg is not None, "No data in omniwatch.metrics.normalized"
-        # Validate normalized schema
-        assert "entityId" in msg or "entity_id" in msg
-        assert "timestamp" in msg or "timestampMs" in msg
-        assert "metricName" in msg or "metric_name" in msg
+        # Validate anomaly signal schema (entity-resolved anomalies)
+        assert "entity_id" in msg
+        assert "entity_type" in msg
+        assert "timestamp" in msg
+        assert "source_type" in msg
+        assert "source_topic" in msg
 
     def test_normalized_log_topic_has_data(self):
         """Flink has produced normalized log records."""
@@ -106,11 +108,11 @@ class TestPhase2E2E:
         objects = list(
             minio_client.list_objects(
                 "omniwatch-telemetry-archive",
-                prefix="dt=",
+                prefix="entity-resolution/dt=",
                 recursive=True,
             )
         )
-        assert len(objects) >= 1, "No objects in omniwatch-telemetry-archive/ with dt= prefix"
+        assert len(objects) >= 1, "No objects in omniwatch-telemetry-archive/ with entity-resolution/dt= prefix"
         assert objects[0].size > 0, "First object is empty"
 
     def test_security_events_are_routed(self, sample_security_payload):

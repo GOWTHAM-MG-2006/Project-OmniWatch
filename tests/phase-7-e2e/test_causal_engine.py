@@ -246,7 +246,8 @@ class TestHealth:
 
         assert set(body.keys()) == {"status", "kafka", "graph_ready", "last_incident"}
         assert body["status"] in {"healthy", "degraded"}
-        assert body["kafka"] is False  # host has no Kafka broker
+        # Kafka may be reachable (full stack) or not (standalone test)
+        assert isinstance(body["kafka"], bool)
         assert body["last_incident"] == "none"  # nothing processed yet
 
     def test_graph_ready_true_after_build(self, engine: CausalEngine) -> None:
@@ -255,7 +256,9 @@ class TestHealth:
         body = asyncio.run(health())
 
         assert body["graph_ready"] is True
-        assert body["status"] == "degraded"  # kafka still False on host
+        # Status is "healthy" only if BOTH kafka_ok AND graph_ready are True
+        expected_status = "healthy" if body["kafka"] else "degraded"
+        assert body["status"] == expected_status
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
 
-from ingestion.kafka_bus import KafkaProducer, TOPIC_INCIDENTS_CREATED
-
+from ingestion.kafka_bus import TOPIC_INCIDENTS_CREATED, KafkaProducer
 from prioritization.config.settings import Settings
 from prioritization.models import IncidentRecord
 from storage.common import StorageError, create_logger, retry_with_backoff
@@ -37,14 +35,16 @@ class PrioritizationProducer:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
-        bootstrap_servers: Optional[str] = None,
-        client_id: Optional[str] = None,
+        settings: Settings | None = None,
+        bootstrap_servers: str | None = None,
+        client_id: str | None = None,
     ) -> None:
         self._settings = settings or Settings.from_env()
-        self._bootstrap_servers = bootstrap_servers or self._settings.kafka_bootstrap_servers
+        self._bootstrap_servers = (
+            bootstrap_servers or self._settings.kafka_bootstrap_servers
+        )
         self._client_id = client_id or self._settings.kafka_client_id
-        self._producer: Optional[KafkaProducer] = None
+        self._producer: KafkaProducer | None = None
 
     @property
     def topic(self) -> str:
@@ -75,7 +75,7 @@ class PrioritizationProducer:
     def publish_incident(
         self,
         incident: IncidentRecord,
-        key: Optional[str] = None,
+        key: str | None = None,
     ) -> str:
         """Publish a prioritized IncidentRecord to Kafka.
 

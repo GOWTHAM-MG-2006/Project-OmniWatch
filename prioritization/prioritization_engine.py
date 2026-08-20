@@ -16,10 +16,11 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 
 from prioritization.config.settings import Settings
@@ -33,11 +34,12 @@ from storage.common import StorageError, create_logger
 _LOG: logging.Logger = create_logger("omniwatch.prioritization.prioritization_engine")
 
 # API port per phase8-build-plan.md
-API_PORT = int(os.environ.get("PRIORITIZATION_API_PORT", 8009))
+API_PORT = int(os.environ.get("PRIORITIZATION_API_PORT", "8009"))
 
 
 class HealthResponse(BaseModel):
     """Health check response model."""
+
     status: str
     timestamp: str
     version: str = "1.0.0"
@@ -45,6 +47,7 @@ class HealthResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     """Pipeline stats response model."""
+
     processed: int
     published: int
     deduplicated: int
@@ -68,16 +71,18 @@ class PrioritizationEngine:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
-        factory: Optional[IncidentFactory] = None,
-        dedup_engine: Optional[DeduplicationEngine] = None,
-        consumer: Optional[PrioritizationConsumer] = None,
-        producer: Optional[PrioritizationProducer] = None,
+        settings: Settings | None = None,
+        factory: IncidentFactory | None = None,
+        dedup_engine: DeduplicationEngine | None = None,
+        consumer: PrioritizationConsumer | None = None,
+        producer: PrioritizationProducer | None = None,
+        persist_fn: Callable[[IncidentRecord], None] | None = None,
     ) -> None:
         self._settings = settings or Settings.from_env()
         self._factory = factory or IncidentFactory(
             settings=self._settings,
             minio_client=getattr(self._settings, "minio_client", None),
+            persist_fn=persist_fn,
         )
         self._dedup = dedup_engine or DeduplicationEngine(
             ttl_seconds=getattr(self._settings, "dedup_ttl_seconds", 300),
@@ -94,7 +99,7 @@ class PrioritizationEngine:
         self._published = 0
         self._deduplicated = 0
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def processed(self) -> int:
@@ -108,7 +113,9 @@ class PrioritizationEngine:
     def deduplicated(self) -> int:
         return self._deduplicated
 
-    def process_root_cause(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:
+    def process_root_cause(
+        self, root_cause: RootCauseObject | dict[str, Any]
+    ) -> IncidentRecord:
         """Process a single RootCauseObject through the full pipeline.
 
         1. Build an IncidentRecord via the IncidentFactory
@@ -211,7 +218,9 @@ class PrioritizationEngine:
         Returns:
             Number of root causes processed in this batch.
         """
-        root_causes = self._consumer.consume_once(timeout=timeout, max_messages=max_messages)
+        root_causes = self._consumer.consume_once(
+            timeout=timeout, max_messages=max_messages
+        )
         for rc in root_causes:
             try:
                 self.process_root_cause(rc)
@@ -233,6 +242,7 @@ class PrioritizationEngine:
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: start/stop the prioritization engine."""
@@ -244,7 +254,7 @@ async def lifespan(app: FastAPI):
     _LOG.info("FastAPI lifespan: prioritization engine stopped")
 
 
-def create_app(engine: Optional[PrioritizationEngine] = None) -> FastAPI:
+def create_app(engine: PrioritizationEngine | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
@@ -263,6 +273,7 @@ def create_app(engine: Optional[PrioritizationEngine] = None) -> FastAPI:
     async def health() -> HealthResponse:
         """Health check endpoint for K8s liveness/readiness probes."""
         from datetime import datetime, timezone
+
         return HealthResponse(
             status="healthy",
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -289,6 +300,7 @@ app = create_app()
 def main() -> None:
     """Entry point: run the FastAPI app with uvicorn."""
     import uvicorn
+
     uvicorn.run(
         app,
         host="0.0.0.0",

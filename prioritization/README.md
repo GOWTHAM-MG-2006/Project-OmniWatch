@@ -148,3 +148,15 @@ is detected within the TTL window, the existing incident's `deduplicated_count` 
 incremented and the incoming root cause is appended to `related_anomalies`.
 
 **Known limitation:** Single-host only. Horizontal scaling requires migration to Redis-based shared state.
+
+## Known Limitations
+
+1. **In-memory deduplication only** — The deduplication engine uses a thread-safe in-memory `TTLCache`. It does not persist across restarts and cannot share state across multiple replicas. Horizontal scaling requires migration to Redis-based shared state.
+
+2. **Single Kafka partition assumption** — The consumer reads from partition 0 only. In production with multiple partitions, incidents may be processed out of order or missed unless partition assignment is configured.
+
+3. **No retry/backoff on Kafka publish failures** — If the producer fails to publish an `IncidentRecord` to `omniwatch.incidents.created`, the incident is logged and lost. A durable outbox pattern or dead-letter queue is needed for production reliability.
+
+4. **MinIO and ClickHouse archival are best-effort** — Both MinIO archiving and ClickHouse persistence are wrapped in best-effort try/except blocks. Failures are logged but never block incident creation or Kafka publication.
+
+5. **Classification rules are static** — Severity rules are loaded once from `config/classification_rules.yaml` at startup. Runtime changes require a service restart. A hot-reload mechanism or admin API is not yet implemented.

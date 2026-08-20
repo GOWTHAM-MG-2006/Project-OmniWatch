@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from prioritization.config.settings import Settings
@@ -56,21 +57,22 @@ class IncidentFactory:
 
     def __init__(
         self,
-        severity_classifier: Optional[SeverityClassifier] = None,
-        impact_scorer: Optional[ImpactScorer] = None,
-        sla_calculator: Optional[SlaRiskCalculator] = None,
+        severity_classifier: SeverityClassifier | None = None,
+        impact_scorer: ImpactScorer | None = None,
+        sla_calculator: SlaRiskCalculator | None = None,
         minio_client: Any = None,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
+        persist_fn: Callable[[IncidentRecord], None] | None = None,
     ) -> None:
         self._classifier = severity_classifier or SeverityClassifier()
         self._impact_scorer = impact_scorer or ImpactScorer()
         self._sla_calculator = sla_calculator or SlaRiskCalculator()
         self._minio = minio_client
         self._settings = settings or Settings.from_env()
-        self._incidents_bucket = (
-            getattr(self._settings, "minio_incidents_bucket", None)
-            or os.environ.get("MINIO_INCIDENTS_BUCKET", _MINIO_INCIDENTS_BUCKET)
-        )
+        self._incidents_bucket = getattr(
+            self._settings, "minio_incidents_bucket", None
+        ) or os.environ.get("MINIO_INCIDENTS_BUCKET", _MINIO_INCIDENTS_BUCKET)
+        self._persist_fn = persist_fn
 
     def create(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:
         """Build a complete IncidentRecord from a RootCauseObject.
@@ -133,7 +135,17 @@ class IncidentFactory:
         self._archive_to_minio(incident)
 
         # 7. Persist to ClickHouse (best-effort)
-        self._persist_to_clickhouse(incident)
+        if self._persist_fn is not None:
+            try:
+                self._persist_fn(incident)
+            except Exception as exc:  # noqa: BLE001 - best-effort persistence
+                _LOG.warning(
+                    "failed to persist incident %s via inject: %s",
+                    incident.incident_id,
+                    exc,
+                )
+        else:
+            self._persist_to_clickhouse(incident)
 
         return incident
 
@@ -165,7 +177,9 @@ class IncidentFactory:
             return
 
         try:
-            data = json.dumps(incident.model_dump(), default=str, indent=2).encode("utf-8")
+            data = json.dumps(incident.model_dump(), default=str, indent=2).encode(
+                "utf-8"
+            )
             object_name = f"{incident.incident_id}.json"
             self._minio.upload_object(
                 bucket=self._incidents_bucket,
@@ -195,9 +209,9 @@ class IncidentFactory:
         is still published to Kafka and archived to MinIO.
         """
         try:
+            from prioritization.models import flatten_for_clickhouse
             from storage.clickhouse.client import ClickHouseClient
             from storage.config import StorageConfig
-            from prioritization.models import flatten_for_clickhouse
 
             cfg = StorageConfig.from_env()
             client = ClickHouseClient(config=cfg)

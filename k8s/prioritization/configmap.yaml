@@ -1,0 +1,33 @@
+# ---------------------------------------------------------------------------
+# OmniWatch — Prioritization Engine ConfigMap
+# Phase: 8
+# Purpose: Externalized configuration for the prioritization service,
+#          replacing hardcoded defaults with K8s-managed values.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prioritization-config
+  namespace: omniwatch
+  labels:
+    app: prioritization
+    phase: "8"
+    component: incident-prioritization
+data:
+  # Kafka consumer settings
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  KAFKA_GROUP_ID: "omniwatch-prioritization-group"
+  KAFKA_AUTO_OFFSET_RESET: "earliest"
+
+  # Deduplication settings
+  DEDUP_TTL_SECONDS: "300"
+  DEDUP_ENABLED: "true"
+
+  # MinIO archive settings
+  MINIO_ENDPOINT: "minio:9000"
+  MINIO_ACCESS_KEY: "minioadmin"
+  MINIO_SECRET_KEY: "minioadmin"
+  MINIO_INCIDENTS_BUCKET: "omniwatch-incidents"
+
+  # Service API port
+  PRIORITIZATION_API_PORT: "8009"

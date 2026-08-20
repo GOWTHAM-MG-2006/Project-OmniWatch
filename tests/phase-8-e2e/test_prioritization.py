@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from prioritization.models import IncidentRecord
-
 
 # ---------------------------------------------------------------------------
 # Severity Classification Tests
 # ---------------------------------------------------------------------------
+
 
 class TestP1DatabaseIncident:
     """P1: DATABASE entity + confidence >= 85 + impacted >= 3."""
@@ -61,9 +59,7 @@ class TestP1DatabaseLowImpact:
     """P1 also requires impacted_count >= 3.  If impacted_count < 3,
     falls through to P2."""
 
-    def test_database_high_conf_low_impact_is_p2(
-        self, engine, make_root_cause
-    ) -> None:
+    def test_database_high_conf_low_impact_is_p2(self, engine, make_root_cause) -> None:
         rc = make_root_cause(
             entity_type="DATABASE_NODE",
             confidence=0.90,
@@ -125,6 +121,7 @@ class TestP4CatchAll:
 # Impact Scoring Tests
 # ---------------------------------------------------------------------------
 
+
 class TestImpactScoreCalculation:
     """Verify impact score components and clamping."""
 
@@ -164,6 +161,7 @@ class TestImpactScoreCalculation:
 # ---------------------------------------------------------------------------
 # SLA Risk Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSLARiskCalculation:
     """P1 → HIGH, P2 → MEDIUM, P3/P4 → LOW, with impact elevation."""
@@ -207,6 +205,7 @@ class TestSLARiskCalculation:
 # ---------------------------------------------------------------------------
 # Assignment Tests
 # ---------------------------------------------------------------------------
+
 
 class TestAssignmentRouting:
     """P1 + confidence_normalized >= 85 → auto-remediation; else oncall-engineer."""
@@ -268,35 +267,36 @@ class TestAssignmentRouting:
 # Deduplication Tests
 # ---------------------------------------------------------------------------
 
+
 class TestDeduplication:
     """GAP 3: Deduplication engine groups same-entity incidents within TTL."""
 
-    def test_dedup_same_entity_increments_count(
-        self, engine, make_root_cause
-    ) -> None:
-        """Same root_cause_entity → second incident is merged, count = 2."""
+    def test_dedup_same_entity_increments_count(self, engine, make_root_cause) -> None:
+        """Same root_cause_entity → 10 incidents merged, count = 10."""
         rc1 = make_root_cause(
             root_cause_entity="postgresql-database",
             confidence=0.85,
         )
-        rc2 = make_root_cause(
-            incident_id="rc-test-002",
-            root_cause_entity="postgresql-database",
-            confidence=0.90,
-        )
 
         inc1 = engine.process_root_cause(rc1)
-        inc2 = engine.process_root_cause(rc2)
+        assert inc1.deduplicated_count == 1
+
+        inc = inc1
+        for i in range(2, 11):
+            rc = make_root_cause(
+                incident_id=f"rc-test-{i:03d}",
+                root_cause_entity="postgresql-database",
+                confidence=0.90,
+            )
+            inc = engine.process_root_cause(rc)
 
         published = engine._producer._published
-        assert len(published) == 2
+        assert len(published) == 10
 
-        assert inc2.deduplicated_count == 2
-        assert inc2.incident_id == inc1.incident_id
+        assert inc.deduplicated_count == 10
+        assert inc.incident_id == inc1.incident_id
 
-    def test_dedup_different_entities_no_merge(
-        self, engine, make_root_cause
-    ) -> None:
+    def test_dedup_different_entities_no_merge(self, engine, make_root_cause) -> None:
         """Different root_cause_entity → separate incidents, count = 1 each."""
         rc1 = make_root_cause(
             root_cause_entity="postgresql-database",
@@ -363,8 +363,30 @@ class TestDeduplication:
 # Full Pipeline End-to-End Test
 # ---------------------------------------------------------------------------
 
+
 class TestFullPipeline:
     """End-to-end: RootCauseObject → factory → dedup → producer."""
+
+    def test_normal_operation(self, engine, make_root_cause) -> None:
+        """Normal (benign) root cause → P4, low impact, no anomalies."""
+        rc = make_root_cause(
+            entity_type="API_NODE",
+            confidence=0.10,
+            anomaly_score=0.05,
+            impacted_count=1,
+            fault_path=["api-gateway"],
+            evidence={"log_snippets": []},
+        )
+
+        incident = engine.process_root_cause(rc)
+
+        assert isinstance(incident, IncidentRecord)
+        assert incident.severity == "P4"
+        assert incident.sla_breach_risk == "LOW"
+        assert incident.assigned_to == "oncall-engineer"
+        assert incident.deduplicated_count == 1
+        assert incident.status == "OPEN"
+        assert 0.0 <= incident.business_impact_score <= 100.0
 
     def test_full_pipeline_produces_incident_record(
         self, engine, make_root_cause

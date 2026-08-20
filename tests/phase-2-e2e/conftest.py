@@ -68,7 +68,7 @@ def flink_rest_api():
 def minio_client():
     """MinIO client for bucket verification."""
     return Minio(
-        "localhost:9010",
+        "localhost:19000",
         access_key="minioadmin",
         secret_key="minioadmin",
         secure=False,

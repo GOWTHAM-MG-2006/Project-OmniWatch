@@ -11,13 +11,10 @@ Outputs: RootCauseObject dicts fed to PrioritizationEngine
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
-from typing import Any, Optional
 
-from ingestion.kafka_bus import KafkaConsumer, TOPIC_INCIDENTS_CAUSAL
-
+from ingestion.kafka_bus import TOPIC_INCIDENTS_CAUSAL, KafkaConsumer
 from prioritization.config.settings import Settings
 from prioritization.models import RootCauseObject
 from storage.common import StorageError, create_logger
@@ -43,18 +40,22 @@ class PrioritizationConsumer:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
-        bootstrap_servers: Optional[str] = None,
-        group_id: Optional[str] = None,
-        auto_offset_reset: Optional[str] = None,
+        settings: Settings | None = None,
+        bootstrap_servers: str | None = None,
+        group_id: str | None = None,
+        auto_offset_reset: str | None = None,
     ) -> None:
         self._settings = settings or Settings.from_env()
-        self._bootstrap_servers = bootstrap_servers or self._settings.kafka_bootstrap_servers
+        self._bootstrap_servers = (
+            bootstrap_servers or self._settings.kafka_bootstrap_servers
+        )
         self._group_id = group_id or self._settings.kafka_group_id
-        self._auto_offset_reset = auto_offset_reset or self._settings.kafka_auto_offset_reset
-        self._consumer: Optional[KafkaConsumer] = None
+        self._auto_offset_reset = (
+            auto_offset_reset or self._settings.kafka_auto_offset_reset
+        )
+        self._consumer: KafkaConsumer | None = None
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def topic(self) -> str:
@@ -134,4 +135,3 @@ class PrioritizationConsumer:
         # This is a placeholder; the actual dispatch to the engine
         # happens via the prioritization_engine's main loop.
         # The engine calls consume_once() in its own loop for testability.
-        pass
