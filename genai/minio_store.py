@@ -29,6 +29,13 @@ _BUCKETS: dict[str, str] = {
     "postmortem": "omniwatch-runbooks",
 }
 
+# All three required buckets per AGENTS.md MinIO Buckets spec
+_REQUIRED_BUCKETS: frozenset[str] = frozenset({
+    "omniwatch-runbooks",
+    "omniwatch-audit-logs",
+    "omniwatch-incidents",
+})
+
 
 class MinioStore:
     """Wraps a MinIO client with auto-creation of required buckets
@@ -46,9 +53,8 @@ class MinioStore:
             self._ensure_buckets()
 
     def _ensure_buckets(self) -> None:
-        """Create buckets if they do not already exist."""
-        bucket_names = {v for v in _BUCKETS.values()}
-        for bucket in bucket_names:
+        """Create all three required buckets if they do not already exist."""
+        for bucket in _REQUIRED_BUCKETS:
             if not self._client.bucket_exists(bucket):
                 self._client.make_bucket(bucket)
                 logger.info(json.dumps({"event": "bucket_created", "bucket": bucket}))

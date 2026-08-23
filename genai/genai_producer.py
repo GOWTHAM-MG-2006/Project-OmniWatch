@@ -65,7 +65,7 @@ class GenAIProducer:
                 "incident_id": artifact.incident_id,
                 "artifact_type": artifact.artifact_type,
             }))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — produce fallback
             self._stats["errors"] += 1
             logger.error(json.dumps({
                 "event": "produce_error",

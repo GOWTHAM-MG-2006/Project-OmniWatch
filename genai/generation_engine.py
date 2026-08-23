@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field
 
 from genai.grounded_llm_client import GroundedLLMClient
 from genai.incident_summary import IncidentSummaryGenerator
-from genai.runbook_generator import RunbookGenerator
 from genai.models import RootCauseObject
+from genai.runbook_generator import RunbookGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
             )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — generate fallback
         _stats["errors"] += 1
         logger.error(json.dumps({"event": "generate_error", "error": str(exc)}))
         raise HTTPException(status_code=500, detail=str(exc))

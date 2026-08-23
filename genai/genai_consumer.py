@@ -68,37 +68,37 @@ class GenAIConsumer:
             self._client = GroundedLLMClient()
         return self._client
 
-    def _get_summary_gen(self):  # noqa: ANN202
+    def _get_summary_gen(self):
         if self._summary_gen is None:
             from genai.incident_summary import IncidentSummaryGenerator
             self._summary_gen = IncidentSummaryGenerator(self._get_client())
         return self._summary_gen
 
-    def _get_executive_gen(self):  # noqa: ANN202
+    def _get_executive_gen(self):
         if self._executive_gen is None:
             from genai.executive_report import ExecutiveReportGenerator
             self._executive_gen = ExecutiveReportGenerator(self._get_client())
         return self._executive_gen
 
-    def _get_postmortem_gen(self):  # noqa: ANN202
+    def _get_postmortem_gen(self):
         if self._postmortem_gen is None:
             from genai.post_incident_analyser import PostIncidentAnalyser
             self._postmortem_gen = PostIncidentAnalyser(self._get_client())
         return self._postmortem_gen
 
-    def _get_runbook_gen(self):  # noqa: ANN202
+    def _get_runbook_gen(self):
         if self._runbook_gen is None:
             from genai.runbook_generator import RunbookGenerator
             self._runbook_gen = RunbookGenerator(self._get_client())
         return self._runbook_gen
 
-    def _get_store(self):  # noqa: ANN202
+    def _get_store(self):
         if self._store is None:
             from genai.minio_store import MinioStore
             self._store = MinioStore()
         return self._store
 
-    def _get_producer(self):  # noqa: ANN202
+    def _get_producer(self):
         if self._producer is None:
             from genai.genai_producer import GenAIProducer
             self._producer = GenAIProducer()
@@ -166,7 +166,7 @@ class GenAIConsumer:
         root_cause_data = value.get("root_cause", value)
         try:
             root_cause = RootCauseObject(**root_cause_data)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — parse fallback
             self._stats["errors"] += 1
             logger.error(json.dumps({"event": "root_cause_parse_error", "error": str(exc)}))
             return
@@ -179,7 +179,7 @@ class GenAIConsumer:
 
         # Build a coroutine that creates generators INSIDE the event loop
         # so httpx.AsyncClient + asyncio.Semaphore bind to the correct loop.
-        async def _generate_all():  # noqa: ANN202
+        async def _generate_all():
             from genai.executive_report import ExecutiveReportGenerator
             from genai.grounded_llm_client import GroundedLLMClient
             from genai.incident_summary import IncidentSummaryGenerator
@@ -203,7 +203,7 @@ class GenAIConsumer:
             summary_analysis, executive_artifact, postmortem_artifact = (
                 self._run_async(_generate_all())
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — generation fallback
             self._stats["errors"] += 1
             logger.error(json.dumps({
                 "event": "generation_error",
@@ -233,7 +233,7 @@ class GenAIConsumer:
         for artifact in (summary_artifact, executive_artifact, postmortem_artifact):
             try:
                 store.persist(artifact)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — persist fallback
                 logger.error(json.dumps({
                     "event": "persist_error",
                     "incident_id": root_cause.incident_id,
@@ -242,7 +242,7 @@ class GenAIConsumer:
                 }))
             try:
                 producer.produce(artifact)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — produce fallback
                 logger.error(json.dumps({
                     "event": "produce_error",
                     "incident_id": root_cause.incident_id,
@@ -284,7 +284,7 @@ class GenAIConsumer:
 
         try:
             root_cause = RootCauseObject(**root_cause_data)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — parse fallback
             self._stats["errors"] += 1
             logger.error(json.dumps({
                 "event": "remediation_root_cause_parse_error",
@@ -309,7 +309,7 @@ class GenAIConsumer:
 
         # Build a coroutine that creates the generator INSIDE the event loop
         # so httpx.AsyncClient + asyncio.Semaphore bind to the correct loop.
-        async def _generate_runbook():  # noqa: ANN202
+        async def _generate_runbook():
             from genai.grounded_llm_client import GroundedLLMClient
             from genai.runbook_generator import RunbookGenerator
 
@@ -322,7 +322,7 @@ class GenAIConsumer:
 
         try:
             runbook = self._run_async(_generate_runbook())
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — generation fallback
             self._stats["errors"] += 1
             logger.error(json.dumps({
                 "event": "runbook_generation_error",
@@ -335,7 +335,7 @@ class GenAIConsumer:
         store = self._get_store()
         try:
             store.persist(runbook)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — persist fallback
             logger.error(json.dumps({
                 "event": "persist_error",
                 "incident_id": incident_id,
@@ -347,7 +347,7 @@ class GenAIConsumer:
         producer = self._get_producer()
         try:
             producer.produce(runbook)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — produce fallback
             logger.error(json.dumps({
                 "event": "produce_error",
                 "incident_id": incident_id,
@@ -367,11 +367,11 @@ class GenAIConsumer:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _run_async(coro):  # noqa: ANN202
+    def _run_async(coro):
         """Run an async coroutine from a sync context with a timeout."""
         import concurrent.futures
 
-        def _loop():  # noqa: ANN202
+        def _loop():
             return asyncio.run(asyncio.wait_for(coro, timeout=_GENERATOR_TIMEOUT))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

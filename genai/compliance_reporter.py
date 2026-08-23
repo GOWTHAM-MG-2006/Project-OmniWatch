@@ -97,13 +97,13 @@ class ComplianceReporter:
             client = self._get_ch_client()
             client.command("SELECT 1")
             ch_ok = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — health-check fallback
             logger.warning(json.dumps({"event": "clickhouse_health_fail", "error": str(exc)}))
 
         try:
             mclient = self._get_minio_client()
             minio_ok = mclient.bucket_exists(AUDIT_BUCKET)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — health-check fallback
             logger.warning(json.dumps({"event": "minio_health_fail", "error": str(exc)}))
 
         return {"clickhouse": ch_ok, "minio": minio_ok, "all_healthy": ch_ok and minio_ok}
@@ -147,7 +147,7 @@ class ComplianceReporter:
                         "size": str(obj.size or 0),
                         "last_modified": obj.last_modified.isoformat() if obj.last_modified else "",
                     })
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — list fallback
             logger.warning(json.dumps({"event": "minio_list_fail", "incident_id": incident_id, "error": str(exc)}))
         return logs
 
@@ -368,9 +368,11 @@ class ComplianceReporter:
             "",
             "## 2. Threat Analysis",
             "",
-            f"The security event affected entity `{incident.get('root_cause_entity', 'N/A')}` "
-            f"of type `{incident.get('entity_type', 'N/A')}` with a confidence score of "
-            f"`{incident.get('confidence', 'N/A')}`.",
+            (
+                f"The security event affected entity `{incident.get('root_cause_entity', 'N/A')}` "
+                f"of type `{incident.get('entity_type', 'N/A')}` with a confidence score of "
+                f"`{incident.get('confidence', 'N/A')}`."
+            ),
             "",
         ]
 
