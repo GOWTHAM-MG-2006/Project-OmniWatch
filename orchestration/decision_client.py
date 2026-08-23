@@ -55,7 +55,7 @@ class OPADecisionClient:
         opa_url: str | None = None,
         confidence_threshold: float | None = None,
     ) -> None:
-        settings = Settings(_env_file=None)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
         self.opa_url: str = opa_url or settings.opa_url
         self.confidence_threshold: float = (
             confidence_threshold
@@ -171,3 +171,10 @@ class OPADecisionClient:
 
         assert last_error is not None  # always set after loop
         raise last_error
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible alias — plan checkbox imports DecisionClient
+# ---------------------------------------------------------------------------
+
+DecisionClient = OPADecisionClient

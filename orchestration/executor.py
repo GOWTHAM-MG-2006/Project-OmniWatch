@@ -335,7 +335,7 @@ class KubernetesExecutor(ActionExecutor):
             # Map action_type to K8s API call
             if action_type == "restart_service":
                 # Patch deployment to trigger rolling restart
-                body = {
+                body: dict[str, Any] = {
                     "spec": {
                         "template": {
                             "metadata": {

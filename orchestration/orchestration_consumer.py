@@ -82,7 +82,7 @@ class OrchestrationConsumer:
         auto_offset_reset: Optional[str] = None,
         handle_message: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> None:
-        self._settings = settings or Settings(_env_file=None)
+        self._settings = settings or Settings(_env_file=None)  # type: ignore[call-arg]
         self._bootstrap_servers = (
             bootstrap_servers or self._settings.kafka_bootstrap_servers
         )

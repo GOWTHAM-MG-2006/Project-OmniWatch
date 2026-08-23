@@ -44,7 +44,7 @@ def _env_flag(name: str) -> bool:
 # Module-level state — set by _build_orchestrator / configure()
 # ---------------------------------------------------------------------------
 
-_settings: Settings = Settings(_env_file=None)
+_settings: Settings = Settings(_env_file=None)  # type: ignore[call-arg]
 _consumer: OrchestrationConsumer | None = None
 _consumer_started: bool = False
 
@@ -211,7 +211,7 @@ def create_app(
     All dependencies are injectable for testing.  When ``None``, the
     production defaults from ``Settings()`` are used.
     """
-    settings = settings or Settings(_env_file=None)
+    settings = settings or Settings(_env_file=None)  # type: ignore[call-arg]
     orchestrator = _build_orchestrator(
         settings,
         opa=opa,
@@ -280,7 +280,7 @@ def main() -> None:
     """Run the orchestration engine via uvicorn (development mode)."""
     import uvicorn
 
-    settings = Settings(_env_file=None)
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
     uvicorn.run(
         "orchestration.orchestration_engine:app",
         host="0.0.0.0",
