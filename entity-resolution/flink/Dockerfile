@@ -27,6 +27,7 @@ FROM flink:1.17-scala_2.12
 # Putting the fat jar in lib/ pollutes the global 'app' classpath, so
 # `flink run` on the same jar triggers a ChildFirstClassLoader LinkageError
 # (duplicate kafka-clients / flink-connector-kafka classes).
-COPY --from=builder /app/build/libs/omniwatch-entity-resolution-job.jar /opt/flink/jobs/
+# Use unique jar name to force new blob in Flink jobmanager blob storage.
+COPY --from=builder /app/build/libs/omniwatch-entity-resolution-job.jar /opt/flink/jobs/omniwatch-entity-resolution-job-v2.jar
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

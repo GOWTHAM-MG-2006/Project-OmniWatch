@@ -161,6 +161,23 @@ class PrioritizationEngine:
                 incident.deduplicated_count,
                 existing_count,
             )
+            # Update ClickHouse with the incremented deduplicated_count
+            try:
+                from prioritization.models import flatten_for_clickhouse
+                from storage.clickhouse.client import ClickHouseClient
+                from storage.config import StorageConfig
+                cfg = StorageConfig.from_env()
+                client = ClickHouseClient(config=cfg)
+                try:
+                    # Update the deduplicated_count in ClickHouse
+                    client.get_client().command(
+                        f"ALTER TABLE omniwatch.incidents UPDATE deduplicated_count = {incident.deduplicated_count} WHERE incident_id = '{incident.incident_id}'"
+                    )
+                    _LOG.info("Updated deduplicated_count in ClickHouse for incident %s to %d", incident.incident_id, incident.deduplicated_count)
+                finally:
+                    client.close()
+            except Exception as exc:
+                _LOG.warning("Failed to update deduplicated_count in ClickHouse for incident %s: %s", incident.incident_id, exc)
 
         # Step 3: Publish to Kafka
         self._producer.publish_incident(incident)

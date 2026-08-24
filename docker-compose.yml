@@ -189,6 +189,7 @@ services:
       - "8081:8081"
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      KAFKA_GROUP_ID: flink-entity-resolution-v2
     command: jobmanager
     volumes:
       - flink-jobmanager-data:/opt/flink/log
@@ -211,6 +212,7 @@ services:
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       TASK_MANAGER_NUMBER_OF_TASK_SLOTS: 4
+      KAFKA_GROUP_ID: flink-entity-resolution-v2
     command: taskmanager
     depends_on:
       flink-jobmanager:
@@ -232,7 +234,7 @@ services:
       context: ./entity-resolution/flink
       dockerfile: Dockerfile
     container_name: omniwatch-entity-resolution
-    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.entity.EntityResolutionJob /opt/flink/jobs/omniwatch-entity-resolution-job.jar && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
+    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.entity.EntityResolutionJob /opt/flink/jobs/omniwatch-entity-resolution-job-v2.jar && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
     networks:
       - omniwatch-network
     volumes:
@@ -240,6 +242,7 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       OUTPUT_TOPICS: omniwatch.entities.resolved;omniwatch.entities.relationships
+      KAFKA_GROUP_ID: flink-entity-resolution-v2
     depends_on:
       kafka:
         condition: service_healthy
@@ -356,7 +359,7 @@ services:
       context: ./feature-store/flink
       dockerfile: Dockerfile
     container_name: omniwatch-feature-store-flink
-    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.features.FeatureStoreJob /opt/flink/jobs/omniwatch-feature-store-job.jar --kafka.brokers kafka:29092 --clickhouse.host clickhouse --clickhouse.port 8123 --clickhouse.db omniwatch && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
+    command: ["sh", "-c", "for i in $(seq 1 60); do flink run -d -m flink-jobmanager:8081 -c com.omniwatch.features.FeatureStoreJob /opt/flink/jobs/omniwatch-feature-store-job.jar --kafka.brokers kafka:29092 --kafka.group.id flink-feature-store-v2 --clickhouse.host clickhouse --clickhouse.port 8123 --clickhouse.db omniwatch && break; echo \"retry $$i\"; sleep 5; done; sleep infinity"]
     networks:
       - omniwatch-network
     volumes:

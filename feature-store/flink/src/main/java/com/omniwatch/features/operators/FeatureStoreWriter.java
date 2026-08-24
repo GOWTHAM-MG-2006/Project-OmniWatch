@@ -49,10 +49,10 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
     private static final Logger LOG = LoggerFactory.getLogger(FeatureStoreWriter.class);
 
     /** Buffer size threshold for flushing to ClickHouse. */
-    static final int BATCH_SIZE = 100;
+    static final int BATCH_SIZE = 10;
 
     /** Maximum milliseconds between flushes even if the batch is not full. */
-    static final long FLUSH_INTERVAL_MS = 1000L;
+    static final long FLUSH_INTERVAL_MS = 500L;
 
     /** Maximum retry attempts after the initial failure (total tries = MAX_RETRIES + 1). */
     static final int MAX_RETRIES = 3;

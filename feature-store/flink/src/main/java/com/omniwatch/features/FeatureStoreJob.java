@@ -2,19 +2,21 @@
  * OmniWatch — Windowing Layer + Feature Store
  * Component: FeatureStoreJob
  * Phase: 4
- * Purpose: Flink job entry point. Consumes the omniwatch.metrics.normalized
- *          Kafka topic, keys by entity, and branches into tumbling (1m/5m/15m),
+ * Purpose: Flink job entry point. Consumes the omniwatch.metrics.raw
+ *          Kafka topic (raw OTLP JSON from OTel Collector), parses and normalizes,
+ *          keys by entity, and branches into tumbling (1m/5m/15m),
  *          sliding (5m/1m), and session (30s gap) window operators producing
  *          omniwatch.features.windowed_{1m,5m,15m}. A second pipeline reads
  *          the three windowed topics, builds FeatureVectors, and sinks to both
  *          Kafka (omniwatch.features.vector) and ClickHouse (feature_vectors).
- * Inputs: omniwatch.metrics.normalized (Kafka)
+ * Inputs: omniwatch.metrics.raw (Kafka) — raw OTLP JSON from OTel Collector
  * Outputs: omniwatch.features.windowed_{1m,5m,15m} (Kafka),
  *          omniwatch.features.vector (Kafka), feature_vectors (ClickHouse)
  */
 package com.omniwatch.features;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.omniwatch.features.models.FeatureVector;
@@ -49,6 +51,9 @@ import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import java.time.Duration;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -56,6 +61,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Stream topology for the Phase 4 windowing + feature store layer.
+ * Consumes RAW OTLP JSON from OTel Collector and normalizes to MetricsEvent.
  */
 public final class FeatureStoreJob {
 
@@ -63,8 +69,8 @@ public final class FeatureStoreJob {
 
     public static final String JOB_NAME = "OmniWatch Feature Store";
 
-    /** Input topic (produced by the Phase 2 ingestion normalizer). */
-    static final String INPUT_TOPIC = "omniwatch.metrics.normalized";
+    /** Input topic (raw OTLP JSON from OTel Collector Phase 2). */
+    static final String INPUT_TOPIC = "omniwatch.metrics.raw";
 
     /** Output windowed topics (consumed by FeatureVectorBuilder + Phase 6). */
     static final String OUTPUT_TOPIC_WINDOWED_1M = "omniwatch.features.windowed_1m";
@@ -95,7 +101,7 @@ public final class FeatureStoreJob {
 
         ObjectMapper mapper = createMapper();
 
-        // ---- Source: normalized metrics from Kafka ----
+        // ---- Source: raw OTLP JSON metrics from Kafka ----
         KafkaSource<String> source = KafkaSource.<String>builder()
                 .setBootstrapServers(config.kafkaBrokers)
                 .setTopics(INPUT_TOPIC)
@@ -237,12 +243,115 @@ public final class FeatureStoreJob {
         throw new RuntimeException("Kafka not reachable at " + brokers + " after 5 attempts");
     }
 
+    /**
+     * Parses raw OTLP JSON from Kafka and converts to normalized MetricsEvent.
+     * OTLP JSON structure: { "resourceMetrics": [...] }
+     */
     private static MetricsEvent parseEvent(ObjectMapper mapper, String json) {
         try {
-            return mapper.readValue(json, MetricsEvent.class);
+            JsonNode root = mapper.readTree(json);
+            MetricsEvent event = new MetricsEvent();
+
+            // Extract common fields from resource attributes
+            extractResourceAttributes(root, event);
+
+            // Extract metrics data
+            extractMetricsData(root, event);
+
+            return event;
         } catch (Exception e) {
             LOG.error("Failed to parse metrics event, skipping: {}", e.getMessage());
             return new MetricsEvent();
+        }
+    }
+
+    private static void extractResourceAttributes(JsonNode root, MetricsEvent event) {
+        if (!root.has("resourceMetrics")) return;
+        for (JsonNode rm : root.get("resourceMetrics")) {
+            if (!rm.has("resource")) continue;
+            JsonNode resource = rm.get("resource");
+            if (!resource.has("attributes")) continue;
+            for (JsonNode attr : resource.get("attributes")) {
+                String key = attr.get("key").asText();
+                String value = extractAttributeValue(attr.get("value"));
+                event.getAttributes().put(key, value);
+                // Set well-known entity identifiers
+                if (key.equals("service.name")) {
+                    event.setEntityId(value);
+                    event.setEntityType("SERVICE");
+                } else if (key.equals("service.instance.id") && event.getEntityId() == null) {
+                    event.setEntityId(value);
+                } else if (key.equals("cloud.provider")) {
+                    event.getAttributes().put("cloud.provider", value);
+                } else if (key.equals("cloud.region")) {
+                    event.getAttributes().put("cloud.region", value);
+                }
+            }
+        }
+    }
+
+    private static String extractAttributeValue(JsonNode valueNode) {
+        if (valueNode.has("stringValue")) return valueNode.get("stringValue").asText();
+        if (valueNode.has("intValue")) return valueNode.get("intValue").asText();
+        if (valueNode.has("doubleValue")) return valueNode.get("doubleValue").asText();
+        if (valueNode.has("boolValue")) return valueNode.get("boolValue").asText();
+        return valueNode.toString();
+    }
+
+    private static void extractMetricsData(JsonNode root, MetricsEvent event) {
+        if (!root.has("resourceMetrics")) return;
+        for (JsonNode rm : root.get("resourceMetrics")) {
+            if (!rm.has("scopeMetrics")) continue;
+            for (JsonNode sm : rm.get("scopeMetrics")) {
+                if (!sm.has("metrics")) continue;
+                for (JsonNode metric : sm.get("metrics")) {
+                    String metricName = metric.get("name").asText();
+                    event.getAttributes().put("metric.name", metricName);
+                    if (metric.has("description")) {
+                        event.getAttributes().put("metric.description", metric.get("description").asText());
+                    }
+                    if (metric.has("unit")) {
+                        event.getAttributes().put("metric.unit", metric.get("unit").asText());
+                    }
+
+                    // Extract data points (sum, gauge, histogram)
+                    if (metric.has("sum")) {
+                        extractDataPoints(metric.get("sum"), event, metricName);
+                    } else if (metric.has("gauge")) {
+                        extractDataPoints(metric.get("gauge"), event, metricName);
+                    } else if (metric.has("histogram")) {
+                        extractDataPoints(metric.get("histogram"), event, metricName);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void extractDataPoints(JsonNode aggregator, MetricsEvent event, String metricName) {
+        if (!aggregator.has("dataPoints")) return;
+        for (JsonNode dp : aggregator.get("dataPoints")) {
+            // Extract timestamp
+            if (dp.has("timeUnixNano")) {
+                event.setTimestamp(dp.get("timeUnixNano").asLong() / 1_000_000); // nanos to millis
+            } else if (dp.has("startTimeUnixNano")) {
+                event.setTimestamp(dp.get("startTimeUnixNano").asLong() / 1_000_000);
+            }
+
+            // Extract attributes
+            if (dp.has("attributes")) {
+                for (JsonNode attr : dp.get("attributes")) {
+                    String key = attr.get("key").asText();
+                    String value = extractAttributeValue(attr.get("value"));
+                    event.getAttributes().put(key, value);
+                }
+            }
+
+            // Extract value
+            if (dp.has("asInt")) {
+                event.getAttributes().put(metricName + ".value", dp.get("asInt").asText());
+            } else if (dp.has("asDouble")) {
+                event.getAttributes().put(metricName + ".value", dp.get("asDouble").asText());
+            }
         }
     }
 
