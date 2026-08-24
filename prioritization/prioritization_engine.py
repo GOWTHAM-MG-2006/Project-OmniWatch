@@ -147,37 +147,52 @@ class PrioritizationEngine:
             rc.confidence,
         )
 
-        # Step 1: Create incident (classifies, scores, assigns, archives)
-        incident = self._factory.create(rc)
+        # Step 1: Build incident without side effects (defer persist until after dedup)
+        incident = self._factory.build(rc)
 
         # Step 2: Deduplicate
-        existing_count = incident.deduplicated_count
-        incident = self._dedup.check_and_dedup(incident)
-        if incident.deduplicated_count > existing_count:
+        deduped = self._dedup.check_and_dedup(incident)
+        is_dup = deduped.incident_id != incident.incident_id
+        if is_dup:
             self._deduplicated += 1
             _LOG.info(
-                "deduplicated incident: id=%s count=%d (was %d)",
+                "deduplicated incident: id=%s count=%d (incoming %s merged)",
+                deduped.incident_id,
+                deduped.deduplicated_count,
                 incident.incident_id,
-                incident.deduplicated_count,
-                existing_count,
             )
-            # Update ClickHouse with the incremented deduplicated_count
+            # Update ClickHouse deduplicated_count for the surviving row; do not insert orphan
             try:
-                from prioritization.models import flatten_for_clickhouse
                 from storage.clickhouse.client import ClickHouseClient
                 from storage.config import StorageConfig
+
                 cfg = StorageConfig.from_env()
                 client = ClickHouseClient(config=cfg)
                 try:
-                    # Update the deduplicated_count in ClickHouse
                     client.get_client().command(
-                        f"ALTER TABLE omniwatch.incidents UPDATE deduplicated_count = {incident.deduplicated_count} WHERE incident_id = '{incident.incident_id}'"
+                        f"ALTER TABLE omniwatch.incidents UPDATE deduplicated_count = {deduped.deduplicated_count} WHERE incident_id = '{deduped.incident_id}'"
                     )
-                    _LOG.info("Updated deduplicated_count in ClickHouse for incident %s to %d", incident.incident_id, incident.deduplicated_count)
+                    _LOG.info(
+                        "Updated deduplicated_count in ClickHouse for incident %s to %d",
+                        deduped.incident_id,
+                        deduped.deduplicated_count,
+                    )
                 finally:
                     client.close()
             except Exception as exc:
-                _LOG.warning("Failed to update deduplicated_count in ClickHouse for incident %s: %s", incident.incident_id, exc)
+                _LOG.warning(
+                    "Failed to update deduplicated_count in ClickHouse for incident %s: %s",
+                    deduped.incident_id,
+                    exc,
+                )
+            incident = deduped
+        else:
+            # New incident — persist to ClickHouse/MinIO now (no orphan)
+            try:
+                self._factory.persist(deduped)
+            except Exception as exc:  # noqa: BLE001 - persist logs internally
+                _LOG.warning("Failed to persist new incident %s: %s", deduped.incident_id, exc)
+            incident = deduped
 
         # Step 3: Publish to Kafka
         self._producer.publish_incident(incident)

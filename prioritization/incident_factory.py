@@ -74,39 +74,25 @@ class IncidentFactory:
         ) or os.environ.get("MINIO_INCIDENTS_BUCKET", _MINIO_INCIDENTS_BUCKET)
         self._persist_fn = persist_fn
 
-    def create(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:
-        """Build a complete IncidentRecord from a RootCauseObject.
+    def build(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:
+        """Build an IncidentRecord without side effects (no MinIO/ClickHouse).
 
-        Args:
-            root_cause: Phase 7 RootCauseObject dict or Pydantic model.
-
-        Returns:
-            A fully populated IncidentRecord with status="OPEN".
+        Used by PrioritizationEngine to defer persistence until after dedup
+        check so duplicate bursts do not leave orphan ClickHouse rows.
         """
-        # Normalize to RootCauseObject Pydantic model
         if isinstance(root_cause, dict):
             rc = RootCauseObject(**root_cause)
         elif isinstance(root_cause, RootCauseObject):
             rc = root_cause
         else:
             raise StorageError(
-                f"IncidentFactory.create expected RootCauseObject or dict, got {type(root_cause).__name__}"
+                f"IncidentFactory.build expected RootCauseObject or dict, got {type(root_cause).__name__}"
             )
-
-        # 1. Severity classification
         severity = self._classifier.classify(rc)
-
-        # 2. Business impact score
         business_impact = self._impact_scorer.score(rc, severity)
-
-        # 3. SLA breach risk
         sla_risk = self._sla_calculator.calculate(severity, business_impact)
-
-        # 4. Assignment routing
         confidence_normalized = normalize_confidence(rc.confidence)
         assigned_to = self._assign(severity, confidence_normalized)
-
-        # 5. Build the IncidentRecord
         timestamp = rc.timestamp or datetime.now(timezone.utc).isoformat()
         incident = IncidentRecord(
             incident_id=str(uuid4()),
@@ -120,9 +106,8 @@ class IncidentFactory:
             assigned_to=assigned_to,
             status="OPEN",
         )
-
         _LOG.info(
-            "incident created: id=%s severity=%s impact=%.1f sla=%s assigned_to=%s entity=%s",
+            "incident built (no persist): id=%s severity=%s impact=%.1f sla=%s assigned_to=%s entity=%s",
             incident.incident_id,
             severity,
             business_impact,
@@ -130,11 +115,11 @@ class IncidentFactory:
             assigned_to,
             rc.root_cause_entity,
         )
+        return incident
 
-        # 6. Archive full incident JSON to MinIO (best-effort)
+    def persist(self, incident: IncidentRecord) -> None:
+        """Archive to MinIO + persist to ClickHouse (best-effort) for an already-built incident."""
         self._archive_to_minio(incident)
-
-        # 7. Persist to ClickHouse (best-effort)
         if self._persist_fn is not None:
             try:
                 self._persist_fn(incident)
@@ -147,6 +132,30 @@ class IncidentFactory:
         else:
             self._persist_to_clickhouse(incident)
 
+    def create(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:
+        """Build a complete IncidentRecord from a RootCauseObject.
+
+        Args:
+            root_cause: Phase 7 RootCauseObject dict or Pydantic model.
+
+        Returns:
+            A fully populated IncidentRecord with status="OPEN".
+        """
+        incident = self.build(root_cause)
+        # 6. Archive full incident JSON to MinIO (best-effort)
+        self._archive_to_minio(incident)
+        # 7. Persist to ClickHouse (best-effort)
+        if self._persist_fn is not None:
+            try:
+                self._persist_fn(incident)
+            except Exception as exc:  # noqa: BLE001 - best-effort persistence
+                _LOG.warning(
+                    "failed to persist incident %s via inject: %s",
+                    incident.incident_id,
+                    exc,
+                )
+        else:
+            self._persist_to_clickhouse(incident)
         return incident
 
     def _assign(self, severity: str, confidence_normalized: float) -> str:
