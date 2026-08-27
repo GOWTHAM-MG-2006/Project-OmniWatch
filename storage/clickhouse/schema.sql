@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS omniwatch.knowledge_base
     resolution_summary      String,   -- how the incident was resolved
     actions_taken           String,   -- serialized list of remediation actions
     outcome                 String,   -- success/failure outcome of resolution
+    action_type             String    DEFAULT '',  -- remediation action type (e.g. restart_pod)
+    success_count           UInt32    DEFAULT 0,   -- cumulative success count for this action+entity
     created_at              DateTime  -- UTC entry creation time
 )
 ENGINE = MergeTree

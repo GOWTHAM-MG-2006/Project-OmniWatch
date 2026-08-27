@@ -1,0 +1,21 @@
+# =============================================================================
+# OmniWatch — Continuous Learning Layer (Phase 11)
+# =============================================================================
+#
+# Runtime dependencies for the Learning Service FastAPI service.
+# Version pins match orchestration/predictive requirements.txt.
+# =============================================================================
+
+# -- API framework -------------------------------------------------------------
+fastapi>=0.109.0                    # FastAPI app (learning_service.py)
+uvicorn[standard]>=0.27.0          # ASGI server (learning_service.py CLI)
+
+# -- Kafka (FeedbackLoopProcessor) ---------------------------------------------
+confluent-kafka>=2.3.0              # KafkaConsumer (feedback_loop.py)
+
+# -- Storage clients -----------------------------------------------------------
+clickhouse-connect>=0.7.0           # ClickHouse HTTP client (feedback_loop, pattern_mining, recommendation_engine)
+neo4j>=5.17.0                       # Neo4j Bolt driver (pattern_mining.py)
+
+# -- Configuration / validation ------------------------------------------------
+pydantic>=2.5.0                     # Data validation

@@ -1,0 +1,22 @@
+# =============================================================================
+# OmniWatch — Dashboard API (Phase 11)
+# =============================================================================
+# Runtime dependencies for the Dashboard API FastAPI service.
+# Version pins match learning/orchestration requirements.txt where overlapping.
+# =============================================================================
+
+# -- API framework -------------------------------------------------------------
+fastapi>=0.109.0                    # FastAPI app (main.py)
+uvicorn[standard]>=0.27.0          # ASGI server (main.py CLI)
+
+# -- Storage clients -----------------------------------------------------------
+clickhouse-connect>=0.7.0           # ClickHouse HTTP client (main.py)
+neo4j>=5.17.0                       # Neo4j Bolt driver (main.py)
+minio>=7.2.0                        # MinIO object storage client (main.py)
+
+# -- HTTP client (service proxies) ---------------------------------------------
+httpx>=0.27.0                       # Async HTTP client (genai/orchestration proxies)
+
+# -- Configuration / validation ------------------------------------------------
+pydantic>=2.5.0                     # Data validation
+python-multipart>=0.0.6             # Form data support (FastAPI dependency)
