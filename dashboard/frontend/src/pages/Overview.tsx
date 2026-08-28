@@ -2,7 +2,7 @@
  * OmniWatch — Dashboard Frontend
  * Component: Overview Page
  * Phase: 11
- * Purpose: Main overview dashboard with KPIs, severity donut, timeline, and topology
+ * Purpose: Main overview dashboard with KPIs, severity donut, timeline, and topology — Stitch design polished
  * Inputs: Dashboard API (port 8011) — /api/summary, /api/dashboard/*, /api/topology
  * Outputs: 24-column grid layout with live data
  */
@@ -15,11 +15,11 @@ import { IncidentsTimeline } from '../components/IncidentsTimeline'
 import { TopologyMini } from '../components/TopologyMini'
 
 function SkeletonCard() {
-  return <div className="card p-4 animate-pulse h-24 bg-bg-deep rounded-lg" />
+  return <div className="col-span-6 card p-4 animate-pulse h-24 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }} />
 }
 
 function SkeletonChart({ className }: { className?: string }) {
-  return <div className={`card animate-pulse bg-bg-deep rounded-lg ${className ?? ''}`} />
+  return <div className={`card animate-pulse rounded-lg border border-[#2a2a2a] ${className ?? ''}`} style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }} />
 }
 
 export function Overview() {
@@ -28,17 +28,23 @@ export function Overview() {
   const { data: timeline, loading: tlLoading } = useFetch(() => fetchIncidentsTimeline(24))
   const { data: topology, loading: topoLoading } = useFetch(fetchTopology)
 
-  const statusColor = summaryErr ? 'text-status-critical' : 'text-status-healthy'
+  const statusColor = summaryErr ? 'bg-[#ef4444]' : 'bg-[#22c55e]'
+  const statusShadow = summaryErr
+    ? '0 0 6px rgba(239, 68, 68, 0.4)'
+    : '0 0 6px rgba(34, 197, 94, 0.4)'
   const statusLabel = summaryErr ? 'Offline' : summaryLoading ? 'Connecting...' : 'Live'
 
   return (
-    <div className="grid-24 gap-2 p-4">
+    <div className="p-4 flex flex-col gap-3">
       {/* Status indicator */}
-      <div className="col-span-24 flex items-center gap-2 mb-1">
-        <span className={`w-2 h-2 rounded-full ${statusColor} ${!summaryErr && !summaryLoading ? 'animate-pulse' : ''}`} />
-        <span className="text-[10px] text-text-muted uppercase tracking-widest">{statusLabel}</span>
+      <div className="flex items-center gap-2 mb-1">
+        <span
+          className={`w-2 h-2 rounded-full ${statusColor} ${!summaryErr && !summaryLoading ? 'animate-pulse' : ''}`}
+          style={{ boxShadow: statusShadow }}
+        />
+        <span className="text-[10px] text-[#a1a1aa] uppercase tracking-widest font-mono">{statusLabel}</span>
         {summary?.timestamp && (
-          <span className="text-[10px] text-text-muted ml-auto">
+          <span className="text-[10px] text-[#a1a1aa] ml-auto font-mono">
             {new Date(summary.timestamp).toLocaleTimeString()}
           </span>
         )}
@@ -54,48 +60,49 @@ export function Overview() {
         </>
       ) : (
         <>
-          <KpiCard label="Total Incidents" value={summary?.total_incidents ?? 0} />
-          <KpiCard label="Active Anomalies" value={summary?.active_anomalies ?? 0} />
-          <KpiCard label="Knowledge Base" value={summary?.knowledge_base_entries ?? 0} />
-          <KpiCard label="Active Anomalies" value={summary?.active_anomalies ?? 0} />
+          <KpiCard label="Total Incidents" value={summary?.total_incidents ?? 0} color="cyan" />
+          <KpiCard label="Active Anomalies" value={summary?.active_anomalies ?? 0} color="red" />
+          <KpiCard label="Knowledge Base" value={summary?.knowledge_base_entries ?? 0} color="violet" />
+          <KpiCard label="Active Anomalies" value={summary?.active_anomalies ?? 0} color="green" />
         </>
       )}
 
-      {/* Severity Donut — col-span-8 */}
-      {sevLoading ? (
-        <SkeletonChart className="col-span-8 h-56" />
-      ) : (
-        <div className="col-span-8 card p-4">
-          <div className="text-text-muted text-[10px] uppercase tracking-widest mb-2">Severity Distribution</div>
-          <div className="h-44">
-            <SeverityDonut data={sevDist?.distribution ?? []} />
+      {/* Severity Donut + Timeline row */}
+      <div className="grid grid-cols-8 gap-3">
+        {sevLoading ? (
+          <SkeletonChart className="col-span-3 h-56" />
+        ) : (
+          <div className="col-span-3 card p-4 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}>
+            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest mb-2 font-mono">Severity Distribution</div>
+            <div className="h-44">
+              <SeverityDonut data={sevDist?.distribution ?? []} />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Timeline — col-span-16 */}
-      {tlLoading ? (
-        <SkeletonChart className="col-span-16 h-56" />
-      ) : (
-        <div className="col-span-16 card p-4">
-          <div className="text-text-muted text-[10px] uppercase tracking-widest mb-2">Incident Timeline (24h)</div>
-          <div className="h-44">
-            <IncidentsTimeline data={timeline?.timeline ?? []} />
+        {tlLoading ? (
+          <SkeletonChart className="col-span-5 h-56" />
+        ) : (
+          <div className="col-span-5 card p-4 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}>
+            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest mb-2 font-mono">Incident Timeline (24h)</div>
+            <div className="h-44">
+              <IncidentsTimeline data={timeline?.timeline ?? []} />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Topology Mini — col-span-24 */}
+      {/* Topology Mini — full width */}
       {topoLoading ? (
-        <SkeletonChart className="col-span-24 h-72" />
+        <SkeletonChart className="h-72" />
       ) : (
-        <div className="col-span-24 card p-4">
+        <div className="card p-4 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-text-muted text-[10px] uppercase tracking-widest">Service Topology</div>
-            <div className="flex gap-3 text-[10px] text-text-muted">
-              <span><span className="inline-block w-2 h-2 rounded-full bg-status-healthy mr-1" />Healthy</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-status-warning mr-1" />Warning</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-status-critical mr-1" />Critical</span>
+            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest font-mono">Service Topology</div>
+            <div className="flex gap-3 text-[10px] text-[#a1a1aa]">
+              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#22c55e', boxShadow: '0 0 6px rgba(34,197,94,0.4)' }} />Healthy</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#f59e0b', boxShadow: '0 0 6px rgba(245,158,11,0.4)' }} />Warning</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }} />Critical</span>
             </div>
           </div>
           <div className="h-64">
