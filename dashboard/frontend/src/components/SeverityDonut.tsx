@@ -27,7 +27,7 @@ export function SeverityDonut({ data }: SeverityDonutProps) {
     )
   }
 
-  const total = data.reduce((s, d) => s + d.cnt, 0)
+  const total = data.reduce((s, d) => s + (d.cnt ?? 0), 0)
 
   return (
     <div className="h-full flex items-center gap-4">
@@ -50,7 +50,7 @@ export function SeverityDonut({ data }: SeverityDonutProps) {
           <Tooltip
             contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, fontSize: 12 }}
             labelStyle={{ color: '#a1a1aa' }}
-            formatter={(value: number) => [`${value} (${((value / total) * 100).toFixed(0)}%)`, 'Count']}
+            formatter={(value: number) => [`${value} (${((value / (total || 1)) * 100).toFixed(0)}%)`, 'Count']}
           />
         </PieChart>
       </ResponsiveContainer>
@@ -64,7 +64,7 @@ export function SeverityDonut({ data }: SeverityDonutProps) {
           </div>
         ))}
         <div className="border-t border-border-default pt-1 mt-1 text-text-muted">
-          Total: <span className="text-text-primary font-mono">{total}</span>
+          Total: <span className="text-text-primary font-mono">{Number.isFinite(total) ? total : 0}</span>
         </div>
       </div>
     </div>

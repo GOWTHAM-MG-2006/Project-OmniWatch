@@ -63,8 +63,8 @@ export function IncidentExplorer() {
 
   const { data: sevDist } = useFetch(fetchSeverityDistribution)
 
-  const incidents = data?.incidents ?? []
-  const total = data?.count ?? 0
+  const incidents = data?.incidents ?? data?.items ?? []
+  const total = data?.count ?? data?.total_count ?? incidents.length
 
   return (
     <div className="p-4 flex flex-col gap-3">
@@ -74,7 +74,14 @@ export function IncidentExplorer() {
           <h1 className="font-heading text-lg text-[#e4e4e7]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             Incident Explorer
           </h1>
-          <p className="text-[#a1a1aa] text-xs font-mono">{total} incidents found</p>
+          <p className="text-[#a1a1aa] text-xs font-mono">
+            {incidents.length > 0
+              ? `${incidents.length}${total > incidents.length ? ` of ${total}` : ''} incidents found`
+              : total > 0
+                ? `${total} incidents found (no matching data loaded)`
+                : 'No incidents found'
+            }
+          </p>
         </div>
 
         <div className="flex gap-2">
@@ -152,23 +159,23 @@ export function IncidentExplorer() {
                 <td colSpan={8} className="p-8 text-center text-[#a1a1aa]">No incidents found</td>
               </tr>
             ) : (
-              incidents.map((inc) => (
+              incidents.map((inc: any) => (
                 <tr key={inc.incident_id} className="border-b border-[#2a2a2a] hover:bg-[#141618] transition-colors">
-                  <td className="p-3"><SeverityBadge severity={inc.severity} /></td>
-                  <td className="p-3"><StatusDot status={inc.status} /></td>
-                  <td className="p-3 text-[#e4e4e7] font-mono truncate max-w-[200px]">{inc.root_cause_entity}</td>
-                  <td className="p-3 text-[#a1a1aa]">{inc.entity_type}</td>
-                  <td className="p-3 text-[#e4e4e7] font-mono">{inc.impacted_services}</td>
+                  <td className="p-3"><SeverityBadge severity={inc.severity ?? 'P4'} /></td>
+                  <td className="p-3"><StatusDot status={inc.status ?? 'OPEN'} /></td>
+                  <td className="p-3 text-[#e4e4e7] font-mono truncate max-w-[200px]">{inc.root_cause_entity ?? '—'}</td>
+                  <td className="p-3 text-[#a1a1aa]">{inc.entity_type ?? '—'}</td>
+                  <td className="p-3 text-[#e4e4e7] font-mono">{inc.impacted_services ?? '—'}</td>
                   <td className="p-3">
                     <span className={`font-mono text-[10px] font-bold ${
                       inc.sla_breach_risk === 'HIGH' ? 'text-[#ef4444]' :
                       inc.sla_breach_risk === 'MEDIUM' ? 'text-[#f59e0b]' :
                       'text-[#22c55e]'
                     }`}>
-                      {inc.sla_breach_risk}
+                      {inc.sla_breach_risk ?? '—'}
                     </span>
                   </td>
-                  <td className="p-3 text-[#a1a1aa]">{inc.assigned_to}</td>
+                  <td className="p-3 text-[#a1a1aa]">{inc.assigned_to ?? '—'}</td>
                   <td className="p-3 text-[#a1a1aa] font-mono">
                     {inc.created_at ? new Date(inc.created_at).toLocaleString() : '—'}
                   </td>

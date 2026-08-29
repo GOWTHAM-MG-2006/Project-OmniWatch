@@ -63,7 +63,10 @@ export interface Incident {
 
 export interface IncidentsResponse {
   incidents: Incident[]
+  // Backend may return `items` (paginated) or `total_count`; accept both for resilience
+  items?: Incident[]
   count: number
+  total_count?: number
   timestamp: string
 }
 
@@ -123,12 +126,6 @@ export interface KnowledgeResponse {
   timestamp: string
 }
 
-export interface CopilotResponse {
-  answer: string
-  sources: string[]
-  timestamp: string
-}
-
 // ── API calls ───────────────────────────────────────────────────────
 
 export async function fetchSummary(): Promise<SummaryResponse> {
@@ -167,11 +164,6 @@ export async function fetchEntityHealth(): Promise<EntityHealthResponse> {
 
 export async function fetchKnowledgeBase(): Promise<KnowledgeResponse> {
   const { data } = await api.get<KnowledgeResponse>('/knowledge-base')
-  return data
-}
-
-export async function fetchCopilot(query: string): Promise<CopilotResponse> {
-  const { data } = await api.get<CopilotResponse>('/copilot', { params: { query } })
   return data
 }
 
