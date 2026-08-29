@@ -7,6 +7,7 @@ const navItems = [
   { path: '/knowledge', label: 'Knowledge', icon: '◆' },
   { path: '/reports', label: 'Reports', icon: '◇' },
   { path: '/security', label: 'Security', icon: '▣' },
+  { path: '/storage', label: 'Storage', icon: '⬢' },
 ]
 
 export function Sidebar() {

@@ -24,13 +24,15 @@ const REPORT_ICONS: Record<string, string> = {
 }
 
 function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
-  const { data, loading, error } = useFetch<GenAIReport>(
+  const { data, loading, error, refetch } = useFetch<GenAIReport>(
     async () => {
       const { data } = await api.get<GenAIReport>(endpoint)
       return data
     },
     [endpoint],
   )
+
+  const isEmpty = data?.source === 'empty'
 
   return (
     <div
@@ -46,19 +48,37 @@ function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
           <div className="text-[#e4e4e7] text-[10px] uppercase tracking-widest font-mono">{title}</div>
         </div>
         {data?.source && (
-          <span className="text-[10px] text-[#a1a1aa] font-mono px-2 py-0.5 rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>
-            {data.source}
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded" style={{ background: isEmpty ? 'rgba(234,179,8,0.15)' : 'rgba(0,212,255,0.1)', color: isEmpty ? '#eab308' : '#00d4ff' }}>
+            {data.source} · {data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'live'}
           </span>
         )}
       </div>
       <div className="flex-1 min-h-[180px]">
         {loading ? (
-          <div className="h-full flex flex-col items-center justify-center gap-2 text-[#a1a1aa] text-sm">
-            <div className="w-8 h-8 rounded-full border-2 border-[#00d4ff] border-t-transparent animate-spin" />
-            <span className="font-mono text-xs">Generating...</span>
+          <div className="h-full flex flex-col gap-2 p-2">
+            <div className="h-3 w-3/4 rounded bg-[#2a2a2a] animate-pulse" />
+            <div className="h-3 w-full rounded bg-[#2a2a2a] animate-pulse" />
+            <div className="h-3 w-5/6 rounded bg-[#2a2a2a] animate-pulse" />
+            <div className="h-3 w-2/3 rounded bg-[#2a2a2a] animate-pulse" />
+            <div className="flex items-center justify-center gap-2 text-[#a1a1aa] text-sm mt-4">
+              <div className="w-5 h-5 rounded-full border-2 border-[#00d4ff] border-t-transparent animate-spin" />
+              <span className="font-mono text-xs">Loading live report...</span>
+            </div>
           </div>
         ) : error ? (
-          <div className="h-full flex items-center justify-center text-[#ef4444] text-sm font-mono">{error}</div>
+          <div className="h-full flex flex-col items-center justify-center gap-3 text-sm font-mono">
+            <span className="text-[#ef4444]">{error}</span>
+            <button onClick={refetch} className="px-3 py-1 rounded bg-[#00d4ff] text-black text-xs font-semibold hover:bg-[#00b8db] transition-colors">Retry</button>
+            <span className="text-[10px] text-[#a1a1aa]">GET {endpoint} → live ClickHouse/MinIO/Ollama</span>
+          </div>
+        ) : isEmpty ? (
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-center p-2">
+            <span className="text-[#eab308] text-xs font-mono">No reports yet — generate one</span>
+            <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px] w-full text-left">
+              {data?.content ?? 'No incidents recorded yet — run `python simulation/anomaly_injector.py --scenario database_cascade` to seed ClickHouse.'}
+            </pre>
+            <button onClick={refetch} className="mt-1 px-3 py-1 rounded border border-[#eab308] text-[#eab308] text-xs font-mono hover:bg-[rgba(234,179,8,0.1)] transition-colors">Retry</button>
+          </div>
         ) : (
           <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px]">
             {data?.content ?? 'No content available'}

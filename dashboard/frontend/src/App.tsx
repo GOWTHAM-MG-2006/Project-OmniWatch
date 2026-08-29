@@ -7,6 +7,7 @@ import { Topology } from './pages/Topology'
 import { KnowledgeBase } from './pages/KnowledgeBase'
 import { GenAIReports } from './pages/GenAIReports'
 import { Security } from './pages/Security'
+import { MinioBrowser } from './pages/MinioBrowser'
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
               <Route path="/knowledge" element={<KnowledgeBase />} />
               <Route path="/reports" element={<GenAIReports />} />
               <Route path="/security" element={<Security />} />
+              <Route path="/storage" element={<MinioBrowser />} />
             </Routes>
           </main>
         </div>

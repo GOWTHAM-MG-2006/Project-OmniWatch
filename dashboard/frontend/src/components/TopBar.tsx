@@ -1,9 +1,7 @@
-import { useState } from 'react'
-
-type Timeframe = '1h' | '6h' | '24h' | '7d'
+import { useTimeRange, TIMEFRAMES, type Timeframe } from '../hooks/useTimeRange'
 
 export function TopBar() {
-  const [timeframe, setTimeframe] = useState<Timeframe>('24h')
+  const { timeRange, setTimeRange } = useTimeRange()
 
   return (
     <header className="h-12 bg-bg-card border-b border-border-default flex items-center px-4 gap-4 shrink-0">
@@ -12,14 +10,15 @@ export function TopBar() {
         OmniWatch
       </div>
 
-      {/* Timeframe Picker */}
-      <div className="flex items-center gap-1 ml-4">
-        {(['1h', '6h', '24h', '7d'] as Timeframe[]).map((tf) => (
+      {/* Timeframe Picker — writes to URL ?timeRange= */}
+      <div className="flex items-center gap-1 ml-4" role="group" aria-label="Timeframe">
+        {TIMEFRAMES.map((tf: Timeframe) => (
           <button
             key={tf}
-            onClick={() => setTimeframe(tf)}
+            onClick={() => setTimeRange(tf)}
+            aria-pressed={timeRange === tf}
             className={`px-2 py-1 text-xs rounded transition-colors ${
-              timeframe === tf
+              timeRange === tf
                 ? 'bg-accent-cyan/20 text-accent-cyan'
                 : 'text-text-muted hover:text-text-primary hover:bg-bg-deep'
             }`}

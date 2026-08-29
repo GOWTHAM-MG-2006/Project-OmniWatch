@@ -9,6 +9,7 @@
 
 import { useState } from 'react'
 import { useFetch } from '../hooks/useFetch'
+import { useTimeRange } from '../hooks/useTimeRange'
 import { fetchIncidents, fetchSeverityDistribution } from '../api/client'
 
 const SEVERITY_STYLES: Record<string, { bg: string; text: string; shadow: string }> = {
@@ -55,13 +56,14 @@ function StatusDot({ status }: { status: string }) {
 export function IncidentExplorer() {
   const [severityFilter, setSeverityFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const { timeRange, hours } = useTimeRange()
 
   const { data, loading } = useFetch(
-    () => fetchIncidents({ severity: severityFilter || undefined, status: statusFilter || undefined, limit: 100 }),
-    [severityFilter, statusFilter],
+    () => fetchIncidents({ severity: severityFilter || undefined, status: statusFilter || undefined, limit: 100, timeRange, hours }),
+    [severityFilter, statusFilter, timeRange],
   )
 
-  const { data: sevDist } = useFetch(fetchSeverityDistribution)
+  const { data: sevDist } = useFetch(() => fetchSeverityDistribution({ timeRange, hours }), [timeRange])
 
   const incidents = data?.incidents ?? data?.items ?? []
   const total = data?.count ?? data?.total_count ?? incidents.length
@@ -81,6 +83,7 @@ export function IncidentExplorer() {
                 ? `${total} incidents found (no matching data loaded)`
                 : 'No incidents found'
             }
+            <span className="text-[#71717a]"> · {timeRange}</span>
           </p>
         </div>
 

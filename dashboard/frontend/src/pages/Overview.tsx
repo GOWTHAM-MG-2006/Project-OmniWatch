@@ -8,6 +8,7 @@
  */
 
 import { useFetch } from '../hooks/useFetch'
+import { useTimeRange } from '../hooks/useTimeRange'
 import { fetchSummary, fetchSeverityDistribution, fetchIncidentsTimeline, fetchTopology } from '../api/client'
 import { KpiCard } from '../components/KpiCard'
 import { SeverityDonut } from '../components/SeverityDonut'
@@ -23,9 +24,10 @@ function SkeletonChart({ className }: { className?: string }) {
 }
 
 export function Overview() {
-  const { data: summary, loading: summaryLoading, error: summaryErr } = useFetch(fetchSummary)
-  const { data: sevDist, loading: sevLoading } = useFetch(fetchSeverityDistribution)
-  const { data: timeline, loading: tlLoading } = useFetch(() => fetchIncidentsTimeline(24))
+  const { timeRange, hours } = useTimeRange()
+  const { data: summary, loading: summaryLoading, error: summaryErr } = useFetch(() => fetchSummary({ timeRange, hours }), [timeRange])
+  const { data: sevDist, loading: sevLoading } = useFetch(() => fetchSeverityDistribution({ timeRange, hours }), [timeRange])
+  const { data: timeline, loading: tlLoading } = useFetch(() => fetchIncidentsTimeline({ timeRange, hours }), [timeRange])
   const { data: topology, loading: topoLoading } = useFetch(fetchTopology)
 
   const statusColor = summaryErr ? 'bg-[#ef4444]' : 'bg-[#22c55e]'
@@ -43,6 +45,7 @@ export function Overview() {
           style={{ boxShadow: statusShadow }}
         />
         <span className="text-[10px] text-[#a1a1aa] uppercase tracking-widest font-mono">{statusLabel}</span>
+        <span className="text-[10px] text-[#71717a] font-mono">· {timeRange}</span>
         {summary?.timestamp && (
           <span className="text-[10px] text-[#a1a1aa] ml-auto font-mono">
             {new Date(summary.timestamp).toLocaleTimeString()}
@@ -84,7 +87,7 @@ export function Overview() {
           <SkeletonChart className="col-span-5 h-56" />
         ) : (
           <div className="col-span-5 card p-4 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}>
-            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest mb-2 font-mono">Incident Timeline (24h)</div>
+            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest mb-2 font-mono">Incident Timeline ({timeRange})</div>
             <div className="h-44">
               <IncidentsTimeline data={timeline?.timeline ?? []} />
             </div>

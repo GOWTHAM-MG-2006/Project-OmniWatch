@@ -8,6 +8,7 @@
  */
 
 import { useFetch } from '../hooks/useFetch'
+import { useTimeRange } from '../hooks/useTimeRange'
 import { fetchKnowledgeBase } from '../api/client'
 
 function SuccessBar({ success, failure }: { success: number; failure: number }) {
@@ -45,7 +46,8 @@ function TypeTag({ type }: { type: string }) {
 }
 
 export function KnowledgeBase() {
-  const { data, loading } = useFetch(fetchKnowledgeBase)
+  const { timeRange, hours } = useTimeRange()
+  const { data, loading } = useFetch(() => fetchKnowledgeBase({ timeRange, hours }), [timeRange])
   const entries = data?.entries ?? []
   const total = data?.count ?? 0
 
@@ -56,7 +58,7 @@ export function KnowledgeBase() {
         <h1 className="font-heading text-lg text-[#e4e4e7]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           Knowledge Base
         </h1>
-        <p className="text-[#a1a1aa] text-xs font-mono">{total} resolved incident patterns</p>
+        <p className="text-[#a1a1aa] text-xs font-mono">{total} resolved incident patterns <span className="text-[#71717a]">· {timeRange}</span></p>
       </div>
 
       {/* Stats row */}
