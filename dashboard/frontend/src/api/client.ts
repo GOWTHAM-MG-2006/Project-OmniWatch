@@ -222,6 +222,9 @@ export interface MinioObjectsResponse {
   limit: number
   offset: number
   timestamp: string
+  error?: string
+  has_more?: boolean
+  truncated?: boolean
 }
 
 export async function fetchMinioBuckets(): Promise<MinioBucketsResponse> {
@@ -235,7 +238,7 @@ export async function fetchMinioObjects(params: {
   limit?: number
   offset?: number
 }): Promise<MinioObjectsResponse> {
-  const { data } = await api.get<MinioObjectsResponse>('/minio/objects', { params })
+  const { data } = await api.get<MinioObjectsResponse>('/minio/objects', { params, timeout: 8000 })
   return data
 }
 

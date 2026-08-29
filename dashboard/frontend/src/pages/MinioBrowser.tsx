@@ -56,8 +56,14 @@ export function MinioBrowser() {
     setObjectsError(null)
     try {
       const res = await fetchMinioObjects({ bucket, prefix: pfx, limit, offset: off })
-      setObjects(res.objects)
-      setTotal(res.total)
+      if (res.error) {
+        setObjectsError(res.error)
+        setObjects(res.objects ?? [])
+        setTotal(res.total ?? 0)
+      } else {
+        setObjects(res.objects)
+        setTotal(res.total)
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load objects'
       const isAxios = (e as unknown as { response?: { data?: { error?: string } } })?.response?.data?.error

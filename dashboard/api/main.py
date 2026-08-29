@@ -19,13 +19,17 @@ import textwrap
 from datetime import datetime, timezone
 from typing import Any
 
+import asyncio
+
 import clickhouse_connect  # type: ignore[import-untyped]
 import httpx
 import minio  # type: ignore[import-untyped]
 import neo4j
+import urllib3  # type: ignore[import-untyped]
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from urllib3.util import Retry, Timeout
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -94,11 +98,18 @@ def _get_neo4j_driver() -> Any:
 def _get_minio_client() -> Any:
     global _minio_client
     if _minio_client is None:
+        http_client = urllib3.PoolManager(
+            timeout=Timeout(connect=1.5, read=2.5),
+            maxsize=10,
+            cert_reqs="CERT_NONE" if not MINIO_SECURE else "CERT_REQUIRED",
+            retries=Retry(total=1, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504]),
+        )
         _minio_client = minio.Minio(
             MINIO_ENDPOINT,
             access_key=MINIO_ACCESS_KEY,
             secret_key=MINIO_SECRET_KEY,
             secure=MINIO_SECURE,
+            http_client=http_client,
         )
     return _minio_client
 
@@ -675,30 +686,67 @@ def create_app() -> FastAPI:
         limit: int = Query(50, ge=1, le=500, description="Page size"),
         offset: int = Query(0, ge=0, description="Pagination offset"),
     ):
-        """List objects in a bucket with name/size/last_modified — paginated, live."""
-        try:
+        def _sync_collect() -> tuple[list[dict], bool, int]:
             client = _get_minio_client()
             objs: list[dict] = []
+            has_more = False
+            idx = 0
             for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
-                lm = getattr(obj, "last_modified", None)
-                objs.append(
-                    {
-                        "name": getattr(obj, "object_name", "") or "",
-                        "size": int(getattr(obj, "size", 0) or 0),
-                        "last_modified": lm.isoformat() if hasattr(lm, "isoformat") and lm else (str(lm) if lm else None),
-                        "etag": getattr(obj, "etag", None),
-                    }
-                )
-            total = len(objs)
-            paged = objs[offset : offset + limit]
+                if idx < offset:
+                    idx += 1
+                    continue
+                if len(objs) < limit:
+                    lm = getattr(obj, "last_modified", None)
+                    objs.append(
+                        {
+                            "name": getattr(obj, "object_name", "") or "",
+                            "size": int(getattr(obj, "size", 0) or 0),
+                            "last_modified": lm.isoformat() if hasattr(lm, "isoformat") and lm else (str(lm) if lm else None),
+                            "etag": getattr(obj, "etag", None),
+                        }
+                    )
+                    idx += 1
+                    continue
+                has_more = True
+                break
+            if has_more:
+                total = offset + len(objs) + 1
+            else:
+                total = idx if idx >= offset else 0
+                if total < offset:
+                    total = 0
+                    objs = []
+            return objs, has_more, total
+
+        try:
+            objs, has_more, total = await asyncio.wait_for(
+                asyncio.to_thread(_sync_collect), timeout=3.2
+            )
             return {
                 "bucket": bucket,
                 "prefix": prefix,
-                "objects": paged,
-                "count": len(paged),
+                "objects": objs,
+                "count": len(objs),
                 "total": total,
                 "limit": limit,
                 "offset": offset,
+                "has_more": has_more,
+                "truncated": has_more,
+                "timestamp": _now_iso(),
+            }
+        except asyncio.TimeoutError:
+            _LOG.warning("MinIO list_objects timed out bucket=%s prefix=%s", bucket, prefix)
+            return {
+                "bucket": bucket,
+                "prefix": prefix,
+                "objects": [],
+                "count": 0,
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "has_more": False,
+                "truncated": False,
+                "error": "MinIO listing timed out — bucket is slow or too large, try a more specific prefix filter",
                 "timestamp": _now_iso(),
             }
         except Exception as exc:  # noqa: BLE001
@@ -706,6 +754,20 @@ def create_app() -> FastAPI:
             _LOG.warning("MinIO list_objects failed bucket=%s: %s", bucket, msg)
             if "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"bucket not found: {bucket}", "bucket": bucket, "timestamp": _now_iso()})
+            if "timed out" in msg.lower() or "ReadTimeout" in msg or "MaxRetryError" in msg:
+                return {
+                    "bucket": bucket,
+                    "prefix": prefix,
+                    "objects": [],
+                    "count": 0,
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": False,
+                    "truncated": False,
+                    "error": f"MinIO listing timed out: {msg[:200]}",
+                    "timestamp": _now_iso(),
+                }
             return JSONResponse(status_code=500, content={"error": msg, "bucket": bucket, "timestamp": _now_iso()})
 
     # ----- incident archive (MinIO) -----
