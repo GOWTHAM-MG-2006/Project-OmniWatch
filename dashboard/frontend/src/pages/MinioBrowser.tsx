@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
-import { fetchMinioBuckets, fetchMinioObjects } from '../api/client'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { fetchMinioBuckets, fetchMinioObjects, minioUpload, minioDownload, minioDeleteObject, minioDeleteBucket, minioCreateBucket } from '../api/client'
 import type { MinioBucket, MinioObject } from '../api/client'
+import { AuthGate } from '../components/AuthGate'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -27,6 +28,13 @@ export function MinioBrowser() {
   const limit = 50
   const [objectsLoading, setObjectsLoading] = useState(false)
   const [objectsError, setObjectsError] = useState<string | null>(null)
+
+  const [uploading, setUploading] = useState(false)
+  const [showCreateBucket, setShowCreateBucket] = useState(false)
+  const [newBucketName, setNewBucketName] = useState('')
+  const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadBuckets = useCallback(async () => {
     setBucketsLoading(true)
@@ -96,23 +104,136 @@ export function MinioBrowser() {
     loadObjects(selectedBucket, prefix, 0)
   }
 
+  const handleUpload = async (file: File) => {
+    if (!selectedBucket) return
+    setUploading(true)
+    setActionMsg(null)
+    setActionErr(null)
+    try {
+      await minioUpload(selectedBucket, file.name, file)
+      setActionMsg(`Uploaded ${file.name}`)
+      loadObjects(selectedBucket, prefix, offset)
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDownload = async (objName: string) => {
+    if (!selectedBucket) return
+    try {
+      const blob = await minioDownload(selectedBucket, objName)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = objName.split('/').pop() || objName
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Download failed')
+    }
+  }
+
+  const handleDeleteObject = async (objName: string) => {
+    if (!selectedBucket || !confirm(`Delete ${objName}?`)) return
+    setActionMsg(null)
+    setActionErr(null)
+    try {
+      await minioDeleteObject(selectedBucket, objName)
+      setActionMsg(`Deleted ${objName}`)
+      loadObjects(selectedBucket, prefix, offset)
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
+  const handleCreateBucket = async () => {
+    if (!newBucketName.trim()) return
+    setActionMsg(null)
+    setActionErr(null)
+    try {
+      await minioCreateBucket(newBucketName.trim())
+      setActionMsg(`Created bucket ${newBucketName.trim()}`)
+      setNewBucketName('')
+      setShowCreateBucket(false)
+      loadBuckets()
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Create bucket failed')
+    }
+  }
+
+  const handleDeleteBucket = async (name: string) => {
+    if (!confirm(`Delete bucket "${name}"? This only works if the bucket is empty.`)) return
+    setActionMsg(null)
+    setActionErr(null)
+    try {
+      await minioDeleteBucket(name)
+      setActionMsg(`Deleted bucket ${name}`)
+      if (selectedBucket === name) {
+        setSelectedBucket(null)
+        setObjects([])
+        setTotal(0)
+      }
+      loadBuckets()
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Delete bucket failed')
+    }
+  }
+
   const totalPages = Math.ceil(total / limit)
   const currentPage = Math.floor(offset / limit) + 1
 
   return (
-    <div className="p-4 flex flex-col gap-4">
+    <AuthGate service="minio" onAuth={loadBuckets}>
+      <div className="p-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-text-primary">MinIO Browser</h1>
           <p className="text-xs text-text-muted font-mono">Live buckets & objects via MinIO SDK — GET /api/minio/buckets · /api/minio/objects?bucket=</p>
         </div>
-        <button
-          onClick={() => { if (selectedBucket) { loadBuckets(); loadObjects(selectedBucket, prefix, offset) } else loadBuckets() }}
-          className="px-3 py-1.5 text-xs font-mono rounded border border-[#2a2a2a] hover:border-accent-cyan/40 hover:text-accent-cyan transition-colors"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCreateBucket(!showCreateBucket)}
+            className="px-3 py-1.5 text-xs font-mono rounded bg-accent-cyan/10 hover:bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/30"
+          >
+            + Bucket
+          </button>
+          <button
+            onClick={() => { if (selectedBucket) { loadBuckets(); loadObjects(selectedBucket, prefix, offset) } else loadBuckets() }}
+            className="px-3 py-1.5 text-xs font-mono rounded border border-[#2a2a2a] hover:border-accent-cyan/40 hover:text-accent-cyan transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {actionMsg && (
+        <div className="px-3 py-2 text-xs font-mono rounded bg-green-900/20 border border-green-900/40 text-green-400 flex items-center justify-between">
+          {actionMsg}
+          <button onClick={() => setActionMsg(null)} className="text-green-400/60 hover:text-green-400">×</button>
+        </div>
+      )}
+      {actionErr && (
+        <div className="px-3 py-2 text-xs font-mono rounded bg-red-900/20 border border-red-900/40 text-red-400 flex items-center justify-between">
+          {actionErr}
+          <button onClick={() => setActionErr(null)} className="text-red-400/60 hover:text-red-400">×</button>
+        </div>
+      )}
+
+      {showCreateBucket && (
+        <div className="card p-3 rounded-lg border border-[#2a2a2a] flex items-center gap-2">
+          <input
+            value={newBucketName}
+            onChange={(e) => setNewBucketName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreateBucket()}
+            placeholder="new-bucket-name"
+            className="px-2 py-1 text-xs bg-[#0a0a0f] border border-[#2a2a2a] rounded font-mono flex-1 focus:outline-none focus:border-accent-cyan/40"
+          />
+          <button onClick={handleCreateBucket} className="px-3 py-1 text-xs rounded bg-accent-cyan/20 hover:bg-accent-cyan/30 text-accent-cyan border border-accent-cyan/30">Create</button>
+          <button onClick={() => { setShowCreateBucket(false); setNewBucketName('') }} className="px-3 py-1 text-xs rounded border border-[#2a2a2a] hover:border-red-900/40 text-text-muted">Cancel</button>
+        </div>
+      )}
 
       {bucketsLoading ? (
         <div className="card p-6 text-sm text-text-muted animate-pulse">Loading buckets...</div>
@@ -134,14 +255,22 @@ export function MinioBrowser() {
             <div className="px-3 py-2 text-[10px] uppercase tracking-widest text-text-muted font-mono border-b border-[#2a2a2a]">Buckets ({buckets?.length ?? 0})</div>
             <div className="divide-y divide-[#1e1e1e]">
               {buckets?.map((b) => (
-                <button
-                  key={b.name}
-                  onClick={() => handleSelectBucket(b.name)}
-                  className={`w-full text-left px-3 py-2.5 text-sm flex flex-col gap-0.5 hover:bg-[#1a1a1a] transition-colors ${selectedBucket === b.name ? 'bg-accent-cyan/10 border-l-2 border-accent-cyan' : 'border-l-2 border-transparent'}`}
-                >
-                  <span className={`font-mono text-xs truncate ${selectedBucket === b.name ? 'text-accent-cyan' : 'text-text-primary'}`}>{b.name}</span>
-                  {b.creation_date && <span className="text-[10px] text-text-muted">{new Date(b.creation_date).toLocaleString()}</span>}
-                </button>
+                <div key={b.name} className={`flex items-center group ${selectedBucket === b.name ? 'bg-accent-cyan/10 border-l-2 border-accent-cyan' : 'border-l-2 border-transparent'}`}>
+                  <button
+                    onClick={() => handleSelectBucket(b.name)}
+                    className="flex-1 text-left px-3 py-2.5 text-sm flex flex-col gap-0.5 hover:bg-[#1a1a1a] transition-colors"
+                  >
+                    <span className={`font-mono text-xs truncate ${selectedBucket === b.name ? 'text-accent-cyan' : 'text-text-primary'}`}>{b.name}</span>
+                    {b.creation_date && <span className="text-[10px] text-text-muted">{new Date(b.creation_date).toLocaleString()}</span>}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteBucket(b.name)}
+                    className="px-2 py-1 mr-2 text-[10px] font-mono rounded opacity-0 group-hover:opacity-100 hover:bg-red-900/20 text-red-400/50 hover:text-red-400 transition-all"
+                    title="Delete bucket"
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -168,7 +297,26 @@ export function MinioBrowser() {
                       className="px-2 py-1 text-xs bg-[#0a0a0f] border border-[#2a2a2a] rounded font-mono w-32 focus:outline-none focus:border-accent-cyan/40"
                     />
                     <button onClick={handlePrefixSearch} className="px-2 py-1 text-xs rounded bg-[#1e1e2e] hover:bg-[#2a2a4a]">Filter</button>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="px-2 py-1 text-xs rounded bg-accent-cyan/10 hover:bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/30 disabled:opacity-50"
+                    >
+                      {uploading ? 'Uploading...' : 'Upload'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = '' }}
+                    />
                     <button onClick={handleRefresh} className="px-2 py-1 text-xs rounded border border-[#2a2a2a] hover:border-accent-cyan/30">↻</button>
+                    <button
+                      onClick={() => { if (selectedBucket && confirm(`Delete bucket "${selectedBucket}"? Only works if empty.`)) handleDeleteBucket(selectedBucket) }}
+                      className="px-2 py-1 text-xs rounded border border-red-900/30 hover:bg-red-900/20 text-red-400/70 hover:text-red-400"
+                    >
+                      Delete Bucket
+                    </button>
                   </div>
                 </div>
 
@@ -194,14 +342,33 @@ export function MinioBrowser() {
                             <th className="text-left px-3 py-2 font-normal">Name</th>
                             <th className="text-right px-3 py-2 font-normal">Size</th>
                             <th className="text-left px-3 py-2 font-normal">Last modified</th>
+                            <th className="text-right px-3 py-2 font-normal">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#1e1e1e]">
                           {objects.map((o) => (
                             <tr key={o.name} className="hover:bg-[#141618]">
-                              <td className="px-3 py-1.5 font-mono truncate max-w-[360px]" title={o.name}>{o.name}</td>
+                              <td className="px-3 py-1.5 font-mono truncate max-w-[300px]" title={o.name}>{o.name}</td>
                               <td className="px-3 py-1.5 text-right font-mono text-text-muted">{formatSize(o.size)}</td>
                               <td className="px-3 py-1.5 font-mono text-text-muted">{o.last_modified ? new Date(o.last_modified).toLocaleString() : '—'}</td>
+                              <td className="px-3 py-1.5 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    onClick={() => handleDownload(o.name)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-accent-cyan/10 text-accent-cyan/60 hover:text-accent-cyan transition-colors"
+                                    title="Download"
+                                  >
+                                    ↓
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteObject(o.name)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-red-900/20 text-red-400/50 hover:text-red-400 transition-colors"
+                                    title="Delete"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -236,5 +403,6 @@ export function MinioBrowser() {
         </div>
       )}
     </div>
+    </AuthGate>
   )
 }

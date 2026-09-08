@@ -315,4 +315,129 @@ export async function fetchLearningStats() {
   return data
 }
 
+// ── ClickHouse console ─────────────────────────────────────────────
+
+export interface ClickHouseQueryResult {
+  columns: string[]
+  rows: unknown[][]
+  row_count: number
+  truncated: boolean
+  timestamp: string
+  error?: string
+}
+
+export interface ClickHouseTableInfo {
+  database: string
+  name: string
+  engine: string
+  row_count: number
+  total_bytes: number
+}
+
+export interface ClickHouseSchemaColumn {
+  name: string
+  type: string
+  default_kind: string
+  default_expression: string
+  comment: string
+}
+
+function chHeaders(): Record<string, string> {
+  const user = sessionStorage.getItem('ch_user') || ''
+  const pass = sessionStorage.getItem('ch_password') || ''
+  return { 'X-ClickHouse-User': user, 'X-ClickHouse-Password': pass }
+}
+
+export async function clickhouseQuery(query: string, limit = 100): Promise<ClickHouseQueryResult> {
+  const { data } = await api.post<ClickHouseQueryResult>('/clickhouse/query', { query, limit }, { headers: chHeaders(), timeout: 30_000 })
+  return data
+}
+
+export async function clickhouseTables(): Promise<{ tables: ClickHouseTableInfo[]; count: number }> {
+  const { data } = await api.get('/clickhouse/tables', { headers: chHeaders(), timeout: 10_000 })
+  return data
+}
+
+export async function clickhouseSchema(tableName: string): Promise<{ table: string; columns: ClickHouseSchemaColumn[] }> {
+  const { data } = await api.get(`/clickhouse/schema/${encodeURIComponent(tableName)}`, { headers: chHeaders(), timeout: 10_000 })
+  return data
+}
+
+// ── Neo4j console ──────────────────────────────────────────────────
+
+export interface Neo4jQueryResult {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  truncated: boolean
+  timestamp: string
+  error?: string
+}
+
+export interface Neo4jSchemaInfo {
+  labels: string[]
+  relationshipTypes: string[]
+  propertyKeys: string[]
+}
+
+function neo4jHeaders(): Record<string, string> {
+  const user = sessionStorage.getItem('neo4j_user') || ''
+  const pass = sessionStorage.getItem('neo4j_password') || ''
+  return { 'X-Neo4j-User': user, 'X-Neo4j-Password': pass }
+}
+
+export async function neo4jQuery(query: string, limit = 100): Promise<Neo4jQueryResult> {
+  const { data } = await api.post<Neo4jQueryResult>('/neo4j/query', { query, limit }, { headers: neo4jHeaders(), timeout: 30_000 })
+  return data
+}
+
+export async function neo4jSchema(): Promise<Neo4jSchemaInfo> {
+  const { data } = await api.get('/neo4j/schema', { headers: neo4jHeaders(), timeout: 10_000 })
+  return data
+}
+
+// ── MinIO console (auth via headers) ───────────────────────────────
+
+function minioHeaders(): Record<string, string> {
+  const ak = sessionStorage.getItem('minio_access_key') || ''
+  const sk = sessionStorage.getItem('minio_secret_key') || ''
+  return { 'X-MinIO-AccessKey': ak, 'X-MinIO-SecretKey': sk }
+}
+
+export async function minioUpload(bucket: string, key: string, file: File): Promise<{ message: string; bucket: string; key: string }> {
+  const form = new FormData()
+  form.append('bucket', bucket)
+  form.append('key', key)
+  form.append('file', file)
+  const { data } = await api.post('/minio/upload', form, { headers: { ...minioHeaders(), 'Content-Type': 'multipart/form-data' }, timeout: 60_000 })
+  return data
+}
+
+export async function minioDownload(bucket: string, key: string): Promise<Blob> {
+  const { data } = await api.get(`/minio/download/${encodeURIComponent(bucket)}/${key}`, { headers: minioHeaders(), responseType: 'blob', timeout: 60_000 })
+  return data
+}
+
+export async function minioDeleteObject(bucket: string, key: string): Promise<{ message: string }> {
+  const { data } = await api.delete('/minio/object', { headers: minioHeaders(), data: { bucket, key } })
+  return data
+}
+
+export async function minioDeleteBucket(name: string): Promise<{ message: string }> {
+  const { data } = await api.delete(`/minio/bucket/${encodeURIComponent(name)}`, { headers: minioHeaders() })
+  return data
+}
+
+export async function minioCreateBucket(name: string): Promise<{ message: string; bucket: string }> {
+  const { data } = await api.post('/minio/buckets', { name }, { headers: minioHeaders() })
+  return data
+}
+
+export async function minioMetadata(bucket: string, key: string): Promise<{
+  bucket: string; key: string; size: number; content_type: string; last_modified: string; etag: string
+}> {
+  const { data } = await api.get(`/minio/metadata/${encodeURIComponent(bucket)}/${key}`, { headers: minioHeaders() })
+  return data
+}
+
 export default api

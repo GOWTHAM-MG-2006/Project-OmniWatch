@@ -8,6 +8,8 @@ import { KnowledgeBase } from './pages/KnowledgeBase'
 import { GenAIReports } from './pages/GenAIReports'
 import { Security } from './pages/Security'
 import { MinioBrowser } from './pages/MinioBrowser'
+import { DataExplorer } from './pages/DataExplorer'
+import { GraphExplorer } from './pages/GraphExplorer'
 
 function App() {
   return (
@@ -30,6 +32,8 @@ function App() {
               <Route path="/reports" element={<GenAIReports />} />
               <Route path="/security" element={<Security />} />
               <Route path="/storage" element={<MinioBrowser />} />
+              <Route path="/data" element={<DataExplorer />} />
+              <Route path="/graph" element={<GraphExplorer />} />
             </Routes>
           </main>
         </div>

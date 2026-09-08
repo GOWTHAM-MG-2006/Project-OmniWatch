@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import textwrap
 from datetime import datetime, timezone
 from typing import Any
@@ -26,9 +27,9 @@ import httpx
 import minio  # type: ignore[import-untyped]
 import neo4j
 import urllib3  # type: ignore[import-untyped]
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, File, Form, Header, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from urllib3.util import Retry, Timeout
 
 # ---------------------------------------------------------------------------
@@ -658,9 +659,14 @@ def create_app() -> FastAPI:
 
     # ----- MinIO browser — live bucket/object listing (zero dummy) -----
 
-    @app.get("/api/minio/buckets")
-    async def api_minio_buckets() -> dict:
-        """List all MinIO buckets via real MinIO SDK — no hardcoded names."""
+    @app.get("/api/minio/buckets", response_model=None)
+    async def api_minio_buckets(
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        """List all MinIO buckets via real MinIO SDK — no hardcoded names. Auth required."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
             client = _get_minio_client()
             buckets = client.list_buckets()
@@ -679,13 +685,41 @@ def create_app() -> FastAPI:
             _LOG.warning("MinIO list_buckets failed: %s", exc)
             return {"buckets": [], "count": 0, "error": str(exc), "timestamp": _now_iso()}
 
+    @app.post("/api/minio/buckets", response_model=None)
+    async def api_minio_create_bucket(
+        body: dict[str, Any] = Body(...),
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        name = (body.get("name") or "").strip()
+        if not name:
+            return JSONResponse(status_code=422, content={"error": "name is required"})
+        try:
+            client = _get_minio_client()
+            client.make_bucket(name)
+            return {"created": True, "bucket": name, "timestamp": _now_iso()}
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO make_bucket failed name=%s: %s", name, msg)
+            if "BucketAlreadyOwnedByYou" in msg or "BucketAlreadyExists" in msg:
+                return JSONResponse(status_code=409, content={"error": f"bucket already exists: {name}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"create bucket failed: {msg[:200]}"})
+
     @app.get("/api/minio/objects", response_model=None)
     async def api_minio_objects(
         bucket: str = Query(..., min_length=1, description="Bucket name"),
         prefix: str = Query("", description="Optional prefix filter"),
         limit: int = Query(50, ge=1, le=500, description="Page size"),
         offset: int = Query(0, ge=0, description="Pagination offset"),
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
     ):
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         def _sync_collect() -> tuple[list[dict], bool, int]:
             client = _get_minio_client()
             objs: list[dict] = []
@@ -769,6 +803,155 @@ def create_app() -> FastAPI:
                     "timestamp": _now_iso(),
                 }
             return JSONResponse(status_code=500, content={"error": msg, "bucket": bucket, "timestamp": _now_iso()})
+
+    # ----- MinIO object operations (upload / download / delete / metadata) -----
+
+    @app.post("/api/minio/upload", response_model=None)
+    async def api_minio_upload(
+        bucket: str = Form(..., description="Bucket name"),
+        key: str = Form(..., description="Object key"),
+        file: UploadFile = File(..., description="File to upload"),
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        """Upload a file to MinIO. Multipart form: bucket, key, file. Auth required."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        try:
+            content = await file.read()
+            client = _get_minio_client()
+            from io import BytesIO
+            client.put_object(bucket, key, BytesIO(content), len(content), content_type=file.content_type or "application/octet-stream")
+            return {"bucket": bucket, "key": key, "size": len(content), "timestamp": _now_iso()}
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO upload failed bucket=%s key=%s: %s", bucket, key, msg)
+            if "NoSuchBucket" in msg or "does not exist" in msg.lower():
+                return JSONResponse(status_code=404, content={"error": f"bucket not found: {bucket}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"upload failed: {msg[:200]}"})
+
+    @app.get("/api/minio/download/{bucket}/{key:path}", response_model=None)
+    async def api_minio_download(
+        bucket: str,
+        key: str,
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ):
+        """Download/stream an object from MinIO. Auth required. Returns 404 if not found."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        try:
+            client = _get_minio_client()
+            stat = client.stat_object(bucket, key)
+            response = client.get_object(bucket, key)
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO download failed bucket=%s key=%s: %s", bucket, key, msg)
+            if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
+                return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"download failed: {msg[:200]}"})
+        content_type = getattr(stat, "content_type", None) or "application/octet-stream"
+        def _stream():
+            try:
+                with response:
+                    while True:
+                        chunk = response.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                response.close()
+                response.release_conn()
+        return StreamingResponse(_stream(), media_type=content_type, headers={
+            "Content-Disposition": f'attachment; filename="{key.rsplit("/", 1)[-1]}"',
+            "Content-Length": str(getattr(stat, "size", 0) or 0),
+        })
+
+    @app.delete("/api/minio/object", response_model=None)
+    async def api_minio_delete_object(
+        body: dict[str, Any] = Body(...),
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        """Delete an object from MinIO. Body: {bucket, key}. Auth required."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        bucket = (body.get("bucket") or "").strip()
+        key = (body.get("key") or "").strip()
+        if not bucket or not key:
+            return JSONResponse(status_code=422, content={"error": "bucket and key are required"})
+        try:
+            client = _get_minio_client()
+            client.remove_object(bucket, key)
+            return {"deleted": True, "bucket": bucket, "key": key, "timestamp": _now_iso()}
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO delete failed bucket=%s key=%s: %s", bucket, key, msg)
+            if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
+                return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"delete failed: {msg[:200]}"})
+
+    @app.delete("/api/minio/bucket/{name}", response_model=None)
+    async def api_minio_delete_bucket(
+        name: str,
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        """Delete a MinIO bucket. Auth required. Bucket must be empty."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        try:
+            client = _get_minio_client()
+            client.remove_bucket(name)
+            return {"deleted": True, "bucket": name, "timestamp": _now_iso()}
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO remove_bucket failed name=%s: %s", name, msg)
+            if "NoSuchBucket" in msg or "does not exist" in msg.lower():
+                return JSONResponse(status_code=404, content={"error": f"bucket not found: {name}"})
+            if "BucketNotEmpty" in msg:
+                return JSONResponse(status_code=409, content={"error": f"bucket is not empty: {name}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"delete bucket failed: {msg[:200]}"})
+
+    @app.get("/api/minio/metadata/{bucket}/{key:path}", response_model=None)
+    async def api_minio_metadata(
+        bucket: str,
+        key: str,
+        x_minio_access_key: str | None = Header(None, alias="X-MinIO-AccessKey"),
+        x_minio_secret_key: str | None = Header(None, alias="X-MinIO-SecretKey"),
+    ) -> dict | JSONResponse:
+        """Get object metadata from MinIO. Auth required. Returns size, content_type, last_modified, etag."""
+        if not x_minio_access_key or not x_minio_secret_key:
+            return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
+        try:
+            client = _get_minio_client()
+            stat = client.stat_object(bucket, key)
+            lm = getattr(stat, "last_modified", None)
+            return {
+                "bucket": bucket,
+                "key": key,
+                "size": int(getattr(stat, "size", 0) or 0),
+                "content_type": getattr(stat, "content_type", None) or "application/octet-stream",
+                "last_modified": lm.isoformat() if hasattr(lm, "isoformat") and lm else (str(lm) if lm else None),
+                "etag": getattr(stat, "etag", None),
+                "timestamp": _now_iso(),
+            }
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            _LOG.warning("MinIO stat_object failed bucket=%s key=%s: %s", bucket, key, msg)
+            if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
+                return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
+            if "timed out" in msg.lower() or "MaxRetryError" in msg:
+                return JSONResponse(status_code=502, content={"error": "MinIO is not reachable"})
+            return JSONResponse(status_code=500, content={"error": f"metadata failed: {msg[:200]}"})
 
     # ----- incident archive (MinIO) -----
 
@@ -1633,6 +1816,253 @@ def create_app() -> FastAPI:
         if not ok:
             return JSONResponse(status_code=500, content={"error": "failed to save dashboard", "dashboard_id": dashboard_id})
         return {"dashboard_id": dashboard_id, "saved": True, "timestamp": _now_iso()}
+
+    # ----- POST /api/clickhouse/query (SQL proxy) -----
+
+    _DDL_DENY_RE = re.compile(r"\b(DROP|ALTER|TRUNCATE|DETACH|REVOKE|GRANT|CREATE)\b", re.IGNORECASE)
+
+    @app.post("/api/clickhouse/query", response_model=None)
+    async def api_clickhouse_query(
+        body: dict[str, Any] = Body(...),
+        x_clickhouse_user: str | None = Header(None, alias="X-ClickHouse-User"),
+        x_clickhouse_password: str | None = Header(None, alias="X-ClickHouse-Password"),
+    ) -> JSONResponse | dict:
+        """SQL proxy: execute a read-only query against ClickHouse with auth, DDL deny-list, and LIMIT enforcement."""
+        if not x_clickhouse_user or not x_clickhouse_password:
+            return JSONResponse(status_code=401, content={"error": "missing X-ClickHouse-User or X-ClickHouse-Password header"})
+        sql = (body.get("query") or "").strip()
+        if not sql:
+            return JSONResponse(status_code=422, content={"error": "query field is required"})
+        # DDL deny-list: case-insensitive match for destructive SQL keywords
+        if _DDL_DENY_RE.search(sql):
+            return JSONResponse(status_code=422, content={"error": "DDL statements are not allowed (DROP, ALTER, TRUNCATE, DETACH, REVOKE, GRANT, CREATE)"})
+        # LIMIT enforcement: clamp 1..500, append if absent
+        raw_limit = int(body.get("limit", 100) or 100)
+        limit = max(1, min(raw_limit, 500))
+        if not re.search(r"\bLIMIT\s+\d", sql, re.IGNORECASE):
+            sql = f"{sql.rstrip().rstrip(';')} LIMIT {limit}"
+        try:
+            client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_HOST, port=CLICKHOUSE_PORT,
+                username=x_clickhouse_user, password=x_clickhouse_password,
+                connect_timeout=5, send_receive_timeout=30,
+            )
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
+        try:
+            result = client.query(sql)
+        except Exception as exc:
+            msg = str(exc).split("\n")[0][:200]
+            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+                return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
+            if "timeout" in msg.lower():
+                return JSONResponse(status_code=504, content={"error": "query timeout (>30s)"})
+            return JSONResponse(status_code=422, content={"error": f"syntax or execution error: {msg}"})
+        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        rows: list[dict] = []
+        if hasattr(result, "result_rows") and result.result_rows:
+            for row in result.result_rows:
+                rows.append({columns[i]: row[i] for i in range(min(len(columns), len(row)))})
+        truncated = len(rows) >= limit
+        return {"columns": columns, "rows": rows, "row_count": len(rows), "truncated": truncated, "timestamp": _now_iso()}
+
+    # ----- GET /api/clickhouse/tables -----
+
+    @app.get("/api/clickhouse/tables", response_model=None)
+    async def api_clickhouse_tables(
+        x_clickhouse_user: str | None = Header(None, alias="X-ClickHouse-User"),
+        x_clickhouse_password: str | None = Header(None, alias="X-ClickHouse-Password"),
+    ) -> JSONResponse | dict:
+        """List all tables from system.tables with auth credentials."""
+        if not x_clickhouse_user or not x_clickhouse_password:
+            return JSONResponse(status_code=401, content={"error": "missing X-ClickHouse-User or X-ClickHouse-Password header"})
+        try:
+            client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_HOST, port=CLICKHOUSE_PORT,
+                username=x_clickhouse_user, password=x_clickhouse_password,
+                connect_timeout=5, send_receive_timeout=10,
+            )
+            result = client.query(
+                "SELECT database, name, engine FROM system.tables ORDER BY database, name LIMIT 500"
+            )
+        except Exception as exc:
+            msg = str(exc).split("\n")[0][:200]
+            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+                return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
+            if "timeout" in msg.lower():
+                return JSONResponse(status_code=504, content={"error": "query timeout"})
+            return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
+        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        rows: list[dict] = []
+        if hasattr(result, "result_rows") and result.result_rows:
+            for row in result.result_rows:
+                rows.append({columns[i]: row[i] for i in range(min(len(columns), len(row)))})
+        return {"tables": rows, "count": len(rows), "timestamp": _now_iso()}
+
+    # ----- GET /api/clickhouse/schema/{table} -----
+
+    @app.get("/api/clickhouse/schema/{table_name}", response_model=None)
+    async def api_clickhouse_schema(
+        table_name: str,
+        x_clickhouse_user: str | None = Header(None, alias="X-ClickHouse-User"),
+        x_clickhouse_password: str | None = Header(None, alias="X-ClickHouse-Password"),
+    ) -> JSONResponse | dict:
+        """Return column schema for a given table from system.columns with auth credentials."""
+        if not x_clickhouse_user or not x_clickhouse_password:
+            return JSONResponse(status_code=401, content={"error": "missing X-ClickHouse-User or X-ClickHouse-Password header"})
+        # Input validation: table name must be a safe identifier (dots/underscores for db.table)
+        if not re.match(r"^[a-zA-Z0-9_.]+$", table_name):
+            return JSONResponse(status_code=422, content={"error": "invalid table name"})
+        try:
+            client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_HOST, port=CLICKHOUSE_PORT,
+                username=x_clickhouse_user, password=x_clickhouse_password,
+                connect_timeout=5, send_receive_timeout=10,
+            )
+            result = client.query(
+                "SELECT name, type, default_kind, default_expression, comment "
+                "FROM system.columns WHERE table = %(tbl)s ORDER BY position",
+                parameters={"tbl": table_name},
+            )
+        except Exception as exc:
+            msg = str(exc).split("\n")[0][:200]
+            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+                return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
+            if "timeout" in msg.lower():
+                return JSONResponse(status_code=504, content={"error": "query timeout"})
+            return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
+        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        rows: list[dict] = []
+        if hasattr(result, "result_rows") and result.result_rows:
+            for row in result.result_rows:
+                rows.append({columns[i]: row[i] for i in range(min(len(columns), len(row)))})
+        if not rows:
+            return JSONResponse(status_code=404, content={"error": f"table '{table_name}' not found or has no columns"})
+        return {"table": table_name, "columns": rows, "count": len(rows), "timestamp": _now_iso()}
+
+    # ----- POST /api/neo4j/query (Cypher proxy) -----
+
+    # Neo4j DDL deny-list: block destructive operations and label creation.
+    # Note: DELETE is blocked separately (case-insensitive) to catch both
+    # standalone DELETE and DETACH DELETE patterns.
+    _NEO4J_DDL_DENY_RE = re.compile(r"\b(DROP|DETACH\s+DELETE|DELETE|CREATE)\b", re.IGNORECASE)
+
+    @app.post("/api/neo4j/query", response_model=None)
+    async def api_neo4j_query(
+        body: dict[str, Any] = Body(...),
+        x_neo4j_user: str | None = Header(None, alias="X-Neo4j-User"),
+        x_neo4j_password: str | None = Header(None, alias="X-Neo4j-Password"),
+    ) -> JSONResponse | dict:
+        """Cypher proxy: execute a read-only query against Neo4j with auth, DDL deny-list, and LIMIT enforcement.
+
+        Uses a per-request driver (not the module singleton) because each request
+        may carry different credentials via X-Neo4j-User / X-Neo4j-Password headers.
+        The singleton ``_get_neo4j_driver()`` uses env-var credentials and is
+        unsuitable for multi-tenant auth — hence the intentional exception.
+        """
+        if not x_neo4j_user or not x_neo4j_password:
+            return JSONResponse(status_code=401, content={"error": "missing X-Neo4j-User or X-Neo4j-Password header"})
+        cypher = (body.get("query") or "").strip()
+        if not cypher:
+            return JSONResponse(status_code=422, content={"error": "query field is required"})
+        # DDL deny-list: case-insensitive match for destructive Cypher keywords
+        if _NEO4J_DDL_DENY_RE.search(cypher):
+            return JSONResponse(status_code=422, content={"error": "destructive operations are not allowed (DROP, DELETE, DETACH DELETE, CREATE)"})
+        # LIMIT enforcement: clamp 1..500, append if absent
+        raw_limit = int(body.get("limit", 100) or 100)
+        limit = max(1, min(raw_limit, 500))
+        if not re.search(r"\bLIMIT\s+\d", cypher, re.IGNORECASE):
+            cypher = f"{cypher.rstrip()} LIMIT {limit}"
+        # Per-request driver — see docstring for why singleton is not reused
+        driver: Any = None
+        try:
+            driver = neo4j.GraphDatabase.driver(
+                NEO4J_URI, auth=(x_neo4j_user, x_neo4j_password),
+            )
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "Neo4j is not reachable"})
+        try:
+            with driver.session() as session:
+                result = session.run(cypher)
+                records = [dict(record) for record in result]
+            # Flatten keys from all records to build a consistent column list
+            columns: list[str] = []
+            seen: set[str] = set()
+            for rec in records:
+                for key in rec:
+                    if key not in seen:
+                        columns.append(key)
+                        seen.add(key)
+            truncated = len(records) >= limit
+            return {"columns": columns, "rows": records, "row_count": len(records), "truncated": truncated, "timestamp": _now_iso()}
+        except neo4j.exceptions.AuthError:
+            return JSONResponse(status_code=401, content={"error": "Neo4j authentication failed"})
+        except neo4j.exceptions.ServiceUnavailable:
+            return JSONResponse(status_code=502, content={"error": "Neo4j is not reachable"})
+        except neo4j.exceptions.Neo4jError as exc:
+            msg = str(exc).split("\n")[0][:200]
+            if "timeout" in msg.lower():
+                return JSONResponse(status_code=504, content={"error": "query timeout"})
+            return JSONResponse(status_code=422, content={"error": f"syntax or execution error: {msg}"})
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).split("\n")[0][:200]
+            return JSONResponse(status_code=422, content={"error": f"execution error: {msg}"})
+        finally:
+            if driver is not None:
+                try:
+                    driver.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # ----- GET /api/neo4j/schema -----
+
+    @app.get("/api/neo4j/schema", response_model=None)
+    async def api_neo4j_schema(
+        x_neo4j_user: str | None = Header(None, alias="X-Neo4j-User"),
+        x_neo4j_password: str | None = Header(None, alias="X-Neo4j-Password"),
+    ) -> JSONResponse | dict:
+        """Return Neo4j schema metadata: labels, relationship types, and property keys.
+
+        Uses a per-request driver for the same multi-tenant auth reasons as the
+        query endpoint above.
+        """
+        if not x_neo4j_user or not x_neo4j_password:
+            return JSONResponse(status_code=401, content={"error": "missing X-Neo4j-User or X-Neo4j-Password header"})
+        driver: Any = None
+        try:
+            driver = neo4j.GraphDatabase.driver(
+                NEO4J_URI, auth=(x_neo4j_user, x_neo4j_password),
+            )
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "Neo4j is not reachable"})
+        try:
+            with driver.session() as session:
+                labels_rec = session.run("CALL db.labels() YIELD label RETURN label")
+                labels = [record["label"] for record in labels_rec]
+                rels_rec = session.run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
+                rel_types = [record["relationshipType"] for record in rels_rec]
+                props_rec = session.run("CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey")
+                prop_keys = [record["propertyKey"] for record in props_rec]
+            return {
+                "labels": labels,
+                "relationshipTypes": rel_types,
+                "propertyKeys": prop_keys,
+                "count": {"labels": len(labels), "relationshipTypes": len(rel_types), "propertyKeys": len(prop_keys)},
+                "timestamp": _now_iso(),
+            }
+        except neo4j.exceptions.AuthError:
+            return JSONResponse(status_code=401, content={"error": "Neo4j authentication failed"})
+        except neo4j.exceptions.ServiceUnavailable:
+            return JSONResponse(status_code=502, content={"error": "Neo4j is not reachable"})
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).split("\n")[0][:200]
+            return JSONResponse(status_code=422, content={"error": f"schema query error: {msg}"})
+        finally:
+            if driver is not None:
+                try:
+                    driver.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     return app
 

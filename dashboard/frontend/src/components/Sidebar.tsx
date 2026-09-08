@@ -7,6 +7,8 @@ const navItems = [
   { path: '/knowledge', label: 'Knowledge', icon: '◆' },
   { path: '/reports', label: 'Reports', icon: '◇' },
   { path: '/security', label: 'Security', icon: '▣' },
+  { path: '/data', label: 'Data', icon: '▤' },
+  { path: '/graph', label: 'Graph', icon: '⬡' },
   { path: '/storage', label: 'Storage', icon: '⬢' },
 ]
 
