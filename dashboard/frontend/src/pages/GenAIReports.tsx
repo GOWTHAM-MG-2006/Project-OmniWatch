@@ -7,8 +7,23 @@
  * Outputs: Markdown-rendered report cards with loading states
  */
 
+import { useState, useEffect } from 'react'
 import { useFetch } from '../hooks/useFetch'
 import api from '../api/client'
+
+interface ModelSettings {
+  provider: string
+  model_name: string
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  ollama_local: 'Ollama',
+  ollama_cloud: 'Ollama Cloud',
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+}
+
+const FALLBACK_SUBTITLE = 'AI-generated analysis powered by Ollama + qwen3:8b'
 
 interface GenAIReport {
   content: string
@@ -26,7 +41,9 @@ const REPORT_ICONS: Record<string, string> = {
 function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
   const { data, loading, error, refetch } = useFetch<GenAIReport>(
     async () => {
-      const { data } = await api.get<GenAIReport>(endpoint)
+      // GenAI backend calls Ollama qwen3:8b — cold model load + 4-way
+      // concurrency can take ~30s, so allow 60s here (nginx allows 90s).
+      const { data } = await api.get<GenAIReport>(endpoint, { timeout: 60_000 })
       return data
     },
     [endpoint],
@@ -90,6 +107,21 @@ function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
 }
 
 export function GenAIReports() {
+  const [subtitle, setSubtitle] = useState(FALLBACK_SUBTITLE)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<ModelSettings>('/config/model-settings')
+      .then(({ data }) => {
+        if (cancelled) return
+        const label = PROVIDER_LABELS[data.provider] ?? data.provider
+        setSubtitle(`AI-generated analysis powered by ${label} + ${data.model_name}`)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   return (
     <div className="p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -97,7 +129,7 @@ export function GenAIReports() {
           <h1 className="font-heading text-lg text-[#e4e4e7]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             GenAI Reports
           </h1>
-          <p className="text-[#a1a1aa] text-xs font-mono">AI-generated analysis powered by Ollama + qwen3:8b</p>
+          <p className="text-[#a1a1aa] text-xs font-mono">{subtitle}</p>
         </div>
       </div>
 

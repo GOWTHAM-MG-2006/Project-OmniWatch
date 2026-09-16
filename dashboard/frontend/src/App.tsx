@@ -10,6 +10,7 @@ import { Security } from './pages/Security'
 import { MinioBrowser } from './pages/MinioBrowser'
 import { DataExplorer } from './pages/DataExplorer'
 import { GraphExplorer } from './pages/GraphExplorer'
+import ModelSettings from './pages/ModelSettings'
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
               <Route path="/storage" element={<MinioBrowser />} />
               <Route path="/data" element={<DataExplorer />} />
               <Route path="/graph" element={<GraphExplorer />} />
+              <Route path="/settings/model" element={<ModelSettings />} />
             </Routes>
           </main>
         </div>

@@ -10,6 +10,7 @@ const navItems = [
   { path: '/data', label: 'Data', icon: '▤' },
   { path: '/graph', label: 'Graph', icon: '⬡' },
   { path: '/storage', label: 'Storage', icon: '⬢' },
+  { path: '/settings/model', label: 'Model Settings', icon: '⚙' },
 ]
 
 export function Sidebar() {
