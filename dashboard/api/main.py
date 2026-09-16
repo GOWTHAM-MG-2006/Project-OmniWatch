@@ -32,6 +32,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from urllib3.util import Retry, Timeout
 
+try:  # Docker: uvicorn dashboard.api.main:app from /app (PYTHONPATH=/app)
+    from dashboard.api.model_manager import ModelManager, ModelProvider, ModelSettings, sse_response
+except ImportError:  # Local dev: uvicorn main:app from dashboard/api/
+    from model_manager import ModelManager, ModelProvider, ModelSettings, sse_response
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -64,6 +69,29 @@ GENAI_SERVICE_URL: str = os.getenv("GENAI_SERVICE_URL", "http://genai:8020")
 ORCHESTRATION_SERVICE_URL: str = os.getenv("ORCHESTRATION_SERVICE_URL", "http://orchestration:8010")
 
 DASHBOARD_PORT: int = int(os.getenv("DASHBOARD_PORT", "8011"))
+
+# ---------------------------------------------------------------------------
+# Model Manager (LLM provider abstraction — singleton)
+# ---------------------------------------------------------------------------
+
+_model_manager: ModelManager | None = None
+
+
+def _get_model_manager() -> ModelManager:
+    global _model_manager
+    if _model_manager is None:
+        _model_manager = ModelManager()
+    return _model_manager
+
+
+def _mask_api_key(key: str) -> str:
+    """Mask API key for safe display: show last 4 chars only."""
+    if not key:
+        return ""
+    if len(key) <= 4:
+        return "****"
+    return f"{'*' * (len(key) - 4)}{key[-4:]}"
+
 
 # ---------------------------------------------------------------------------
 # Lazy clients
@@ -983,43 +1011,234 @@ def create_app() -> FastAPI:
             _LOG.warning("Learning service proxy failed: %s", exc)
             return {"entity_id": entity_id, "recommendations": [], "count": 0, "error": str(exc)}
 
-    # ----- copilot (Ollama LLM) -----
+    # ----- config: model settings -----
 
-    @app.get("/api/copilot")
+    @app.get("/api/config/model-settings")
+    async def api_get_model_settings() -> dict:
+        """Return current model settings with masked API key."""
+        mm = _get_model_manager()
+        settings = mm.get_settings()
+        d = settings.to_dict()
+        d["api_key"] = _mask_api_key(settings.api_key)
+        return d
+
+    @app.put("/api/config/model-settings", response_model=None)
+    async def api_put_model_settings(body: dict[str, Any]):
+        """Update model settings. Validates provider enum, persists to disk.
+
+        Absent-means-keep for api_key: if the field is omitted from the body,
+        the existing stored key is preserved. An explicit empty string clears it.
+        Frontend omits the field (never sends masked ``sk-...xxxx`` values).
+        """
+        provider_str = body.get("provider", "")
+        try:
+            provider = ModelProvider(provider_str)
+        except ValueError:
+            valid = [p.value for p in ModelProvider]
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid provider '{provider_str}'. Must be one of: {valid}"},
+            )
+
+        mm = _get_model_manager()
+        existing = mm.get_settings()
+        # absent-means-keep: only overwrite if key is explicitly present in body
+        incoming_api_key = body["api_key"] if "api_key" in body else existing.api_key
+
+        new_settings = ModelSettings(
+            provider=provider,
+            model_name=body.get("model_name", "qwen3:8b"),
+            api_key=incoming_api_key,
+            base_url=body.get("base_url", ""),
+            temperature=float(body.get("temperature", 0.7)),
+            max_tokens=int(body.get("max_tokens", 2048)),
+        )
+        mm.update_settings(new_settings)
+
+        resp = new_settings.to_dict()
+        resp["api_key"] = _mask_api_key(new_settings.api_key)
+        return resp
+
+    @app.post("/api/config/test-connection", response_model=None)
+    async def api_test_connection(body: dict[str, Any] | None = None):
+        """Test connection using form overrides (if provided) without persisting.
+
+        Absent-means-keep for api_key: if omitted from body, the stored key
+        is used.  Response always reflects the effective provider/model tested.
+        """
+        mm = _get_model_manager()
+        if not body:
+            return await mm.test_connection()
+
+        provider_str = body.get("provider", "")
+        if provider_str:
+            try:
+                provider = ModelProvider(provider_str)
+            except ValueError:
+                valid = [p.value for p in ModelProvider]
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": f"Invalid provider '{provider_str}'. Must be one of: {valid}"},
+                )
+        else:
+            provider = mm.get_settings().provider
+
+        existing = mm.get_settings()
+        incoming_api_key = body["api_key"] if "api_key" in body else existing.api_key
+
+        merged = ModelSettings(
+            provider=provider,
+            model_name=body.get("model_name", existing.model_name),
+            api_key=incoming_api_key,
+            base_url=body.get("base_url", existing.base_url),
+            temperature=float(body.get("temperature", existing.temperature)),
+            max_tokens=int(body.get("max_tokens", existing.max_tokens)),
+        )
+        return await mm.test_connection(settings=merged)
+
+    # ----- ollama: model management -----
+
+    @app.get("/api/ollama/models", response_model=None)
+    async def api_ollama_models():
+        """List locally available Ollama models (proxy to Ollama /api/tags)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{OLLAMA_URL}/api/tags")
+                resp.raise_for_status()
+                data = resp.json()
+                raw = data.get("models", []) if isinstance(data, dict) else []
+                models = [
+                    {
+                        "name": m.get("name", ""),
+                        "modified_at": m.get("modified_at", ""),
+                        "size": m.get("size", 0),
+                    }
+                    for m in raw
+                    if isinstance(m, dict)
+                ]
+                return {"models": models, "count": len(models)}
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("Ollama models proxy failed: %s", exc)
+            return {"models": [], "count": 0, "error": str(exc)}
+
+    @app.post("/api/ollama/pull", response_model=None)
+    async def api_ollama_pull(body: dict[str, Any] | None = None):
+        """Pull an Ollama model with real-time progress.
+
+        Proxies Ollama ``POST /api/pull`` with ``stream: true`` and forwards
+        every NDJSON line as an SSE ``data:`` frame. The browser reads the
+        stream and renders a live progress bar — the nginx ``/api/ollama/pull``
+        location is tuned for 30-minute streaming with buffering off, so a
+        multi-GB download never hits a gateway timeout. The Ollama daemon
+        continues the download even if the client disconnects (hence ``ollama
+        list`` eventually shows the model), but streaming gives live feedback
+        instead of a silent 504.
+        """
+        name = (body or {}).get("name", "") if body else ""
+        name = name.strip() if isinstance(name, str) else ""
+        if not name:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Missing 'name' in request body."},
+            )
+        if name.endswith(":cloud"):
+            return {
+                "success": True,
+                "name": name,
+                "note": "Cloud models don't need pulling — they run via Ollama Cloud. Just paste your key and Save.",
+            }
+
+        async def event_gen():
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream(
+                        "POST", f"{OLLAMA_URL}/api/pull", json={"name": name, "stream": True}
+                    ) as resp:
+                        if resp.status_code != 200:
+                            body_bytes = await resp.aread()
+                            try:
+                                detail = body_bytes.decode()
+                            except Exception:
+                                detail = str(body_bytes)
+                            yield f"data: {json.dumps({'status': 'error', 'error': detail})}\n\n"
+                            return
+                        async for line in resp.aiter_lines():
+                            if not line.strip():
+                                continue
+                            # Each line is already JSON from Ollama; forward verbatim
+                            yield f"data: {line}\n\n"
+                        yield f"data: {json.dumps({'status': 'success', 'name': name})}\n\n"
+            except Exception as exc:  # noqa: BLE001
+                _LOG.warning("Ollama pull stream failed for %s: %s", name, exc)
+                yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.delete("/api/ollama/models/{model_name:path}", response_model=None)
+    async def api_ollama_delete_model(model_name: str):
+        """Delete an Ollama model (proxy to Ollama /api/delete)."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.request("DELETE", f"{OLLAMA_URL}/api/delete", json={"name": model_name})
+                resp.raise_for_status()
+                return {"success": True, "deleted": model_name}
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("Ollama delete proxy failed for %s: %s", model_name, exc)
+            return {"success": False, "error": str(exc)}
+
+    # ----- copilot (LLM — via ModelManager) -----
+
+    @app.get("/api/copilot", response_model=None)
     async def api_copilot(
         question: str = Query(..., min_length=1),
         context: str = Query(""),
-    ) -> dict:
-        """Ask the copilot a question using Ollama qwen3:8b."""
-        system_prompt = textwrap.dedent("""\
-            You are the OmniWatch AIOps copilot. Answer questions about
-            cloud operations, anomalies, incidents, and root causes.
+        stream: bool = Query(False),
+        history: str = Query(""),
+    ):
+        """Ask the copilot a question. Supports SSE streaming when stream=true.
+        Accepts optional history as JSON array string of {role, content} objects."""
+        mm = _get_model_manager()
+        model_name = mm.get_settings().model_name
+        system_prompt = textwrap.dedent(f"""\
+            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Answer questions about cloud operations, anomalies, incidents, and root causes.
+            Current model: {model_name} — identify as this model when asked "what model are you" or "what parameter model are you".
+            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama ({model_name}), React dashboard.
+            Does NOT use Prometheus / Grafana / PagerDuty / Datadog.
+            Real dashboard routes: Overview (/), Incidents (/incidents), Topology (/topology), Knowledge (/knowledge), Reports (/reports), Security (/security), Data (/data), Graph (/graph), Storage (/storage), Model Settings (/settings/model).
+            Only reference components, tools, and routes listed above. If asked about Prometheus/Grafana, clarify OmniWatch uses OpenTelemetry + ClickHouse instead. If you don't know, say so. Do not invent integrations.
             Be concise and actionable. If you don't know, say so.
         """)
-        user_prompt = question
-        if context:
-            user_prompt = f"Context:\n{context}\n\nQuestion: {question}"
+        user_prompt = f"Context:\n{context}\n\nQuestion: {question}" if context else question
+
+        # Build messages array with optional history
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            try:
+                parsed = json.loads(history)
+                if isinstance(parsed, list):
+                    for entry in parsed[-10:]:
+                        if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("content"):
+                            messages.append({"role": entry["role"], "content": str(entry["content"])[:4000]})
+            except (json.JSONDecodeError, TypeError):
+                pass
+        messages.append({"role": "user", "content": user_prompt})
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    f"{OLLAMA_URL}/api/chat",
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "stream": False,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                answer = data.get("message", {}).get("content", "No response")
-                return {"answer": answer, "model": OLLAMA_MODEL, "timestamp": _now_iso()}
+            mm = _get_model_manager()
+            result = await mm.chat(messages, stream=stream)
+
+            if stream and not isinstance(result, str):
+                return sse_response(result)
+
+            answer = result if isinstance(result, str) else str(result)
+            return {"answer": answer, "model": mm.get_settings().model_name, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
-            _LOG.warning("Ollama copilot failed: %s", exc)
-            return {"answer": "Copilot unavailable — Ollama service not reachable.", "error": str(exc), "timestamp": _now_iso()}
+            _LOG.warning("Copilot failed: %s", exc)
+            return {"answer": "Copilot unavailable — LLM service not reachable.", "error": str(exc), "timestamp": _now_iso()}
 
     # ----- patterns (proxy to learning service) -----
 
@@ -1368,6 +1587,17 @@ def create_app() -> FastAPI:
             _LOG.debug("Ollama enhance failed: %s", exc)
             return None
 
+    async def _llm_generate(prompt: str) -> str | None:
+        """Generate text via configured LLM provider. Returns None on failure."""
+        try:
+            result = await _get_model_manager().generate(prompt)
+            # generate() with stream=False always returns str; narrow for type checker
+            text = result if isinstance(result, str) else ""
+            return text.strip() if text else None
+        except Exception as exc:  # noqa: BLE001
+            _LOG.debug("LLM generate failed: %s", exc)
+            return None
+
     @app.get("/api/genai/summary")
     async def api_genai_summary() -> dict:
         """Live system summary from ClickHouse + MinIO + Ollama. Always returns {content, source, timestamp}."""
@@ -1395,7 +1625,7 @@ def create_app() -> FastAPI:
         content = _render_live_summary_markdown(all_stats, recent, runbooks)
         # Optionally enhance with Ollama using live stats
         prompt = f"Summarize this live AIOps state in 3 sentences, grounded only in these facts:\n{content}\nKeep it concise, no hallucinations."
-        enhanced = await _ollama_enhance(prompt)
+        enhanced = await _llm_generate(prompt)
         if enhanced:
             content = content + "\n\n---\n\n**Ollama qwen3:8b (grounded):**\n\n" + enhanced
             source = "clickhouse+minio+ollama"
@@ -1445,7 +1675,7 @@ def create_app() -> FastAPI:
         lines.extend(["", "## Business Impact", "", "Scores and SLA breach risks are live from ClickHouse; no synthetic data.", ""])
         content = "\n".join(lines)
         prompt = f"Rewrite this as a 4-sentence executive summary for leadership, grounded only in these facts, no hallucinations:\n{content}"
-        enhanced = await _ollama_enhance(prompt)
+        enhanced = await _llm_generate(prompt)
         if enhanced:
             content = content + "\n\n---\n\n**Ollama qwen3:8b (executive, grounded):**\n\n" + enhanced
             source = "clickhouse+ollama"
@@ -1571,29 +1801,6 @@ def create_app() -> FastAPI:
                         except Exception:  # noqa: BLE001
                             txt = data.decode("utf-8", errors="replace")
                             return {"content": f"# Post-Incident Analysis — {iid}\n\n_MinIO `omniwatch-runbooks/{pm_objs[-1]}` (live)_\n\n{txt}", "source": "minio:omniwatch-runbooks", "timestamp": _now_iso()}
-            # Try genai service if it supports postmortem via /generate
-            try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    rc = {
-                        "incident_id": target_incident.get("incident_id", ""),
-                        "root_cause_entity": target_incident.get("root_cause_entity", ""),
-                        "entity_type": target_incident.get("entity_type", ""),
-                        "confidence": float(target_incident.get("confidence", 0) or 0),
-                        "anomaly_score": 0.9,
-                        "fault_path": json.loads(target_incident.get("fault_path", "[]")) if isinstance(target_incident.get("fault_path"), str) else target_incident.get("fault_path", []),
-                        "impacted_services": json.loads(target_incident.get("impacted_services", "[]")) if isinstance(target_incident.get("impacted_services"), str) else target_incident.get("impacted_services", []),
-                        "impacted_count": 1,
-                        "evidence": {},
-                        "timestamp": str(target_incident.get("created_at", _now_iso())),
-                    }
-                    # generation_engine currently only supports summary/runbook; try anyway
-                    resp = await client.post(f"{GENAI_SERVICE_URL}/generate", json={"root_cause": rc, "artifact_type": "summary"})
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        content = data.get("content", "")
-                        return {"content": f"# Post-Incident Analysis — {iid}\n\n_Grounded postmortem via genai-service_\n\n## Timeline\n{target_incident.get('fault_path','')}\n\n## Analysis\n{content}\n\n## Impacted\n{target_incident.get('impacted_services','')}", "source": "genai-service+clickhouse", "timestamp": _now_iso()}
-            except Exception as exc:  # noqa: BLE001
-                _LOG.debug("GenAI postmortem generate failed: %s", exc)
             # Deterministic live fallback
             content = textwrap.dedent(f"""\
                 # Post-Incident Analysis — {iid}
@@ -1618,7 +1825,7 @@ def create_app() -> FastAPI:
                 - Update runbook in `omniwatch-runbooks` bucket.
                 """)
             prompt = f"Write a 3-sentence post-incident lesson, grounded only in: {content}"
-            enhanced = await _ollama_enhance(prompt)
+            enhanced = await _llm_generate(prompt)
             if enhanced:
                 content = content + "\n\n---\n\n**Ollama qwen3:8b (grounded):**\n\n" + enhanced
                 source = "clickhouse+ollama"
@@ -1697,43 +1904,52 @@ def create_app() -> FastAPI:
             "timestamp": _now_iso(),
         }
 
-    # ----- POST /api/copilot (keep existing GET) -----
+    # ----- POST /api/copilot -----
 
     @app.post("/api/copilot", response_model=None)
     async def api_copilot_post(body: dict[str, Any]):
-        """Accept copilot chat as JSON POST body."""
+        """Accept copilot chat as JSON POST body. Supports SSE streaming when body.stream=true.
+        Accepts optional history array of {role, content} objects for context memory."""
         question = body.get("question", "")
         context = body.get("context", "")
+        stream = body.get("stream", False)
+        raw_history = body.get("history", [])
         if not question:
             return JSONResponse(status_code=400, content={"error": "question field required"})
 
-        system_prompt = textwrap.dedent("""\
-            You are the OmniWatch AIOps copilot. Answer questions about
-            cloud operations, anomalies, incidents, and root causes.
+        mm = _get_model_manager()
+        model_name = mm.get_settings().model_name
+        system_prompt = textwrap.dedent(f"""\
+            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Answer questions about cloud operations, anomalies, incidents, and root causes.
+            Current model: {model_name} — identify as this model when asked "what model are you" or "what parameter model are you".
+            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama ({model_name}), React dashboard.
+            Does NOT use Prometheus / Grafana / PagerDuty / Datadog.
+            Real dashboard routes: Overview (/), Incidents (/incidents), Topology (/topology), Knowledge (/knowledge), Reports (/reports), Security (/security), Data (/data), Graph (/graph), Storage (/storage), Model Settings (/settings/model).
+            Only reference components, tools, and routes listed above. If asked about Prometheus/Grafana, clarify OmniWatch uses OpenTelemetry + ClickHouse instead. If you don't know, say so. Do not invent integrations.
             Be concise and actionable. If you don't know, say so.
         """)
         user_prompt = f"Context:\n{context}\n\nQuestion: {question}" if context else question
 
+        # Build messages array with optional history (truncate to last 10)
+        messages = [{"role": "system", "content": system_prompt}]
+        if isinstance(raw_history, list):
+            for entry in raw_history[-10:]:
+                if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("content"):
+                    messages.append({"role": entry["role"], "content": str(entry["content"])[:4000]})
+        messages.append({"role": "user", "content": user_prompt})
+
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    f"{OLLAMA_URL}/api/chat",
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "stream": False,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                answer = data.get("message", {}).get("content", "No response")
-                return {"answer": answer, "model": OLLAMA_MODEL, "timestamp": _now_iso()}
+            mm = _get_model_manager()
+            result = await mm.chat(messages, stream=stream)
+
+            if stream and not isinstance(result, str):
+                return sse_response(result)
+
+            answer = result if isinstance(result, str) else str(result)
+            return {"answer": answer, "model": mm.get_settings().model_name, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
-            _LOG.warning("Ollama copilot POST failed: %s", exc)
-            return {"answer": "Copilot unavailable — Ollama service not reachable.", "error": str(exc), "timestamp": _now_iso()}
+            _LOG.warning("Copilot POST failed: %s", exc)
+            return {"answer": "Copilot unavailable — LLM service not reachable.", "error": str(exc), "timestamp": _now_iso()}
 
     # ----- GET /api/dashboard/{id} (load from MinIO omniwatch-dashboards) -----
 
