@@ -66,4 +66,6 @@ Agents.md
 .mimocode/
 .opencode/
 .omo/
+# Model settings (may contain API keys)
+.omniwatch/
 Phase_Summary_Details/

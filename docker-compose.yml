@@ -126,6 +126,10 @@ services:
     image: ollama/ollama:latest
     container_name: omniwatch-ollama
     runtime: nvidia
+    environment:
+      # Keep qwen3:8b resident so first /reports visit after idle doesn't
+      # pay a cold model load (10-30s) that trips the frontend timeout.
+      OLLAMA_KEEP_ALIVE: 10m
     networks:
       - omniwatch-network
     ports:
@@ -664,6 +668,9 @@ services:
       LEARNING_SERVICE_URL: http://learning:8030
       GENAI_SERVICE_URL: http://genai:8020
       ORCHESTRATION_SERVICE_URL: http://orchestration:8010
+      MODEL_SETTINGS_PATH: /app/.omniwatch/model-settings.json
+    volumes:
+      - ./.omniwatch:/app/.omniwatch
     depends_on:
       clickhouse:
         condition: service_healthy
