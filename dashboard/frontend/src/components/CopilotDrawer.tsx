@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import api from '../api/client'
 import { useStream } from '../hooks/useStream'
 import { StreamingMessage } from './StreamingMessage'
 import { RightDrawer } from './RightDrawer'
@@ -63,6 +64,20 @@ export function CopilotDrawer({ open, onClose }: CopilotDrawerProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
+  const [activeModel, setActiveModel] = useState<string>('')
+  const [activeProvider, setActiveProvider] = useState<string>('')
+
+  // Fetch active model for the header bar (updates on open and after each answer)
+  useEffect(() => {
+    if (!open) return
+    api
+      .get<{ provider: string; model_name: string }>('/config/model-settings')
+      .then(({ data }) => {
+        setActiveModel(data.model_name || '')
+        setActiveProvider(data.provider || '')
+      })
+      .catch(() => {})
+  }, [open, messages.length])
 
   // Derive body for useStream — undefined until user sends
   // useMemo prevents new object identity on every render, which would
@@ -74,7 +89,7 @@ export function CopilotDrawer({ open, onClose }: CopilotDrawerProps) {
         ? {
             question: pendingQuestion,
             stream: true as const,
-            history: messages.slice(-10).map((m) => ({ role: m.role, content: m.text })),
+            history: messages.slice(-6).map((m) => ({ role: m.role, content: m.text.slice(0, 2000) })),
           }
         : undefined,
     [pendingQuestion, messages],
@@ -110,7 +125,7 @@ export function CopilotDrawer({ open, onClose }: CopilotDrawerProps) {
       <div className="flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>
         {/* Memory bar */}
         {messages.length > 0 && (
-          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-deep/60 border border-border-default mb-3 text-xs text-text-muted">
+          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-deep/60 border border-border-default mb-2 text-xs text-text-muted">
             <span>
               Context: {messages.length} message{messages.length !== 1 ? 's' : ''} • ~{messages.reduce((a, m) => a + Math.ceil(m.text.length / 4), 0)} tokens
             </span>
@@ -120,6 +135,13 @@ export function CopilotDrawer({ open, onClose }: CopilotDrawerProps) {
             >
               Clear
             </button>
+          </div>
+        )}
+        {/* Active Model bar */}
+        {activeModel && (
+          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 mb-3 text-xs font-mono">
+            <span className="text-accent-cyan">Active Model: {activeModel}</span>
+            <span className="text-text-muted">{activeProvider}</span>
           </div>
         )}
 

@@ -1204,25 +1204,22 @@ def create_app() -> FastAPI:
         mm = _get_model_manager()
         model_name = mm.get_settings().model_name
         system_prompt = textwrap.dedent(f"""\
-            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Answer questions about cloud operations, anomalies, incidents, and root causes.
-            Current model: {model_name} — identify as this model when asked "what model are you" or "what parameter model are you".
-            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama ({model_name}), React dashboard.
-            Does NOT use Prometheus / Grafana / PagerDuty / Datadog.
-            Real dashboard routes: Overview (/), Incidents (/incidents), Topology (/topology), Knowledge (/knowledge), Reports (/reports), Security (/security), Data (/data), Graph (/graph), Storage (/storage), Model Settings (/settings/model).
-            Only reference components, tools, and routes listed above. If asked about Prometheus/Grafana, clarify OmniWatch uses OpenTelemetry + ClickHouse instead. If you don't know, say so. Do not invent integrations.
-            Be concise and actionable. If you don't know, say so.
+            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Be concise, max 300 words, directly answer the question, use code blocks for queries.
+            Current model: {model_name} — identify as this when asked "what model are you".
+            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama, React. Does NOT use Prometheus/Grafana.
+            Real routes: / (Overview), /incidents, /topology, /knowledge, /reports, /security, /data, /graph, /storage, /settings/model. You can answer general OmniWatch questions (overview, how to use, architecture) using this stack. If asked about Prometheus/Grafana, clarify it uses OTel+ClickHouse. Only invent integrations if truly unknown — then say "I don't know".
         """)
         user_prompt = f"Context:\n{context}\n\nQuestion: {question}" if context else question
 
-        # Build messages array with optional history
+        # Build messages array with optional history (keep short to avoid confusion)
         messages = [{"role": "system", "content": system_prompt}]
         if history:
             try:
                 parsed = json.loads(history)
                 if isinstance(parsed, list):
-                    for entry in parsed[-10:]:
+                    for entry in parsed[-6:]:
                         if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("content"):
-                            messages.append({"role": entry["role"], "content": str(entry["content"])[:4000]})
+                            messages.append({"role": entry["role"], "content": str(entry["content"])[:2000]})
             except (json.JSONDecodeError, TypeError):
                 pass
         messages.append({"role": "user", "content": user_prompt})
@@ -1920,22 +1917,19 @@ def create_app() -> FastAPI:
         mm = _get_model_manager()
         model_name = mm.get_settings().model_name
         system_prompt = textwrap.dedent(f"""\
-            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Answer questions about cloud operations, anomalies, incidents, and root causes.
-            Current model: {model_name} — identify as this model when asked "what model are you" or "what parameter model are you".
-            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama ({model_name}), React dashboard.
-            Does NOT use Prometheus / Grafana / PagerDuty / Datadog.
-            Real dashboard routes: Overview (/), Incidents (/incidents), Topology (/topology), Knowledge (/knowledge), Reports (/reports), Security (/security), Data (/data), Graph (/graph), Storage (/storage), Model Settings (/settings/model).
-            Only reference components, tools, and routes listed above. If asked about Prometheus/Grafana, clarify OmniWatch uses OpenTelemetry + ClickHouse instead. If you don't know, say so. Do not invent integrations.
-            Be concise and actionable. If you don't know, say so.
+            You are the OmniWatch AIOps Copilot (powered by {model_name} via Ollama). Be concise, max 300 words, directly answer the question, use code blocks for queries.
+            Current model: {model_name} — identify as this when asked "what model are you".
+            Real OmniWatch stack: OpenTelemetry SDK + Collector (4317/4318), Kafka, Flink (entity-resolution + feature-store), ClickHouse, Neo4j, MinIO, OPA, Ollama, React. Does NOT use Prometheus/Grafana.
+            Real routes: / (Overview), /incidents, /topology, /knowledge, /reports, /security, /data, /graph, /storage, /settings/model. You can answer general OmniWatch questions (overview, how to use, architecture) using this stack. If asked about Prometheus/Grafana, clarify it uses OTel+ClickHouse. Only invent integrations if truly unknown — then say "I don't know".
         """)
         user_prompt = f"Context:\n{context}\n\nQuestion: {question}" if context else question
 
-        # Build messages array with optional history (truncate to last 10)
+        # Build messages array with optional history (keep short to avoid confusion)
         messages = [{"role": "system", "content": system_prompt}]
         if isinstance(raw_history, list):
-            for entry in raw_history[-10:]:
+            for entry in raw_history[-6:]:
                 if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("content"):
-                    messages.append({"role": entry["role"], "content": str(entry["content"])[:4000]})
+                    messages.append({"role": entry["role"], "content": str(entry["content"])[:2000]})
         messages.append({"role": "user", "content": user_prompt})
 
         try:

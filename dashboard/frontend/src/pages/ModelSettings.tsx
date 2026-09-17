@@ -18,7 +18,6 @@ import { ModelTestResult, type ModelTestResultProps } from '../components/ModelT
 // ── Types ──────────────────────────────────────────────────────────
 
 type ActiveTab = 'ollama' | 'external'
-type ExternalProvider = 'openrouter' | 'groq' | 'custom'
 type BackendProvider = 'ollama' | 'openrouter' | 'groq' | 'custom'
 
 interface ModelSettingsData {
@@ -47,35 +46,7 @@ const DEFAULT_SETTINGS: ModelSettingsData = {
   max_tokens: 2048,
 }
 
-const OLLAMA_SUGGESTIONS = [
-  'qwen3:8b',
-  'llama3.2:3b',
-  'codellama:7b',
-  'minimax-m2.7:cloud',
-  'gpt-oss:120b-cloud',
-  'deepseek-v3.1:cloud',
-]
 
-const EXTERNAL_SUGGESTIONS: Record<ExternalProvider, string[]> = {
-  openrouter: [
-    'meta-llama/llama-3.2-3b-instruct',
-    'mistralai/mistral-7b-instruct',
-    'google/gemma-2-9b-it',
-  ],
-  groq: ['llama-3.2-3b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-  custom: ['gpt-4o', 'claude-3-5-sonnet-20241022', 'gemini-2.0-flash'],
-}
-
-const EXTERNAL_PROVIDER_DEFAULTS: Record<ExternalProvider, string> = {
-  openrouter: 'https://openrouter.ai/api/v1',
-  groq: 'https://api.groq.com/openai/v1',
-  custom: '',
-}
-
-const KNOWN_BASE_URLS = new Set([
-  'https://openrouter.ai/api/v1',
-  'https://api.groq.com/openai/v1',
-])
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -87,11 +58,11 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-function mapBackendTab(provider: string): { tab: ActiveTab; ext: ExternalProvider } {
+function mapBackendTab(provider: string): { tab: ActiveTab } {
   if (provider === 'openrouter' || provider === 'groq' || provider === 'custom') {
-    return { tab: 'external', ext: provider as ExternalProvider }
+    return { tab: 'external' }
   }
-  return { tab: 'ollama', ext: 'openrouter' }
+  return { tab: 'ollama' }
 }
 
 // ── Component ──────────────────────────────────────────────────────
@@ -99,7 +70,6 @@ function mapBackendTab(provider: string): { tab: ActiveTab; ext: ExternalProvide
 export function ModelSettings() {
   // ── Tab state ───────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>('ollama')
-  const [externalProvider, setExternalProvider] = useState<ExternalProvider>('openrouter')
 
   // ── Shared form state ───────────────────────────────────────────
   const [modelName, setModelName] = useState(DEFAULT_SETTINGS.model_name)
@@ -116,7 +86,7 @@ export function ModelSettings() {
   const [testing, setTesting] = useState(false)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [testResult, setTestResult] = useState<ModelTestResultProps | null>(null)
-  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
 
   // ── Ollama state ────────────────────────────────────────────────
   const [ollamaModels, setOllamaModels] = useState<InstalledModel[]>([])
@@ -148,9 +118,8 @@ export function ModelSettings() {
       try {
         const { data } = await api.get<ModelSettingsData>('/config/model-settings')
         if (cancelled) return
-        const { tab, ext } = mapBackendTab(data.provider ?? 'ollama')
+        const { tab } = mapBackendTab(data.provider ?? 'ollama')
         setActiveTab(tab)
-        setExternalProvider(ext)
         setModelName(data.model_name ?? DEFAULT_SETTINGS.model_name)
         setApiKey(data.api_key ?? '')
         setBaseUrl(data.base_url ?? '')
@@ -179,27 +148,6 @@ export function ModelSettings() {
     const t = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(t)
   }, [toast])
-
-  // ── External provider switch ────────────────────────────────────
-
-  const handleExternalProviderSwitch = useCallback((newExt: ExternalProvider) => {
-    setExternalProvider(newExt)
-    // Auto-fill base_url if empty or matches a known default
-    setBaseUrl((prev) => {
-      if (!prev || KNOWN_BASE_URLS.has(prev)) {
-        return EXTERNAL_PROVIDER_DEFAULTS[newExt]
-      }
-      return prev
-    })
-    // Reset to first suggestion for new provider
-    const suggestions = EXTERNAL_SUGGESTIONS[newExt]
-    if (suggestions.length > 0) {
-      setModelName(suggestions[0])
-    }
-    setApiKeyTouched(false)
-    setApiKey('')
-    setTestResult(null)
-  }, [])
 
   // ── Tab switch ──────────────────────────────────────────────────
 
@@ -308,17 +256,29 @@ export function ModelSettings() {
     }
   }, [fetchOllamaModels])
 
-  // ── Build model suggestions for current context ─────────────────
+  // ── Select model (immediately saves) ───────────────────────────────
 
-  const currentSuggestions = activeTab === 'ollama'
-    ? [...ollamaModels.map((m) => m.name), ...OLLAMA_SUGGESTIONS.filter(
-        (s) => !ollamaModels.some((m) => m.name === s),
-      )]
-    : EXTERNAL_SUGGESTIONS[externalProvider]
+  const handleSelectModel = useCallback(async (name: string) => {
+    setModelName(name)
+    setToast(null)
+    try {
+      const payload: Record<string, unknown> = {
+        provider: 'ollama',
+        model_name: name,
+        temperature,
+        max_tokens: maxTokens,
+      }
+      if (apiKeyTouched) payload.api_key = apiKey
+      await api.put('/config/model-settings', payload)
+      setToast({ type: 'success', message: `Selected ${name} — now active` })
+    } catch (err) {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed' })
+    }
+  }, [temperature, maxTokens, apiKey, apiKeyTouched])
 
   // ── Active provider string for backend ───────────────────────────
 
-  const backendProvider: BackendProvider = activeTab === 'ollama' ? 'ollama' : externalProvider
+  const backendProvider: BackendProvider = activeTab === 'ollama' ? 'ollama' : 'custom'
 
   // ── Test connection ─────────────────────────────────────────────
 
@@ -390,11 +350,14 @@ export function ModelSettings() {
       }
       await api.put('/config/model-settings', payload)
       setToast({ type: 'success', message: 'Settings saved successfully' })
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 3000)
       if (apiKeyTouched) {
         setApiKeyTouched(false)
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Save failed'
+      console.error('[ModelSettings] Save failed:', msg, err)
       setToast({ type: 'error', message: msg })
     } finally {
       setSaving(false)
@@ -551,7 +514,7 @@ export function ModelSettings() {
                       <div className="flex items-center gap-2 shrink-0 ml-3">
                         <button
                           type="button"
-                          onClick={() => setModelName(m.name)}
+                          onClick={() => handleSelectModel(m.name)}
                           className={
                             'px-2.5 py-1 rounded-md text-[11px] font-mono transition-all duration-150 ' +
                             (modelName === m.name
@@ -632,8 +595,8 @@ export function ModelSettings() {
               )}
             </div>
 
-            {/* Model name with suggestions */}
-            <div className="flex flex-col gap-2 relative">
+            {/* Model name */}
+            <div className="flex flex-col gap-2">
               <label
                 htmlFor="ollama-model-name"
                 className="text-[10px] uppercase tracking-widest font-mono text-[#a1a1aa]"
@@ -645,34 +608,9 @@ export function ModelSettings() {
                 type="text"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                placeholder="e.g. qwen3:8b"
+                placeholder="e.g. qwen3:8b or minimax-m2.7:cloud"
                 className="w-full px-3 py-2.5 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(0,0,0,0.2)] text-[#e2e2e5] text-sm font-mono placeholder-[#52525b] outline-none transition-all duration-150 focus:border-[rgba(0,212,255,0.3)] focus:shadow-[0_0_8px_rgba(0,212,255,0.06)]"
               />
-              {showSuggestions && currentSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#1a1a1a] shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                  {currentSuggestions.map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setModelName(suggestion)
-                        setShowSuggestions(false)
-                      }}
-                      className={
-                        'w-full text-left px-3 py-2 text-sm font-mono transition-colors ' +
-                        (modelName === suggestion
-                          ? 'bg-[rgba(0,212,255,0.08)] text-[#00d4ff]'
-                          : 'text-[#a1a1aa] hover:bg-[rgba(255,255,255,0.04)] hover:text-[#e2e2e5]')
-                      }
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Ollama Cloud API Key — only needed for :cloud models */}
@@ -796,10 +734,12 @@ export function ModelSettings() {
                 'px-5 py-2.5 rounded-lg text-sm font-mono font-medium transition-all duration-150 ' +
                 (saving || !modelName.trim()
                   ? 'bg-[#2a2a2a] text-[#52525b] cursor-not-allowed'
-                  : 'bg-[#00d4ff] text-black hover:bg-[#00b8db] hover:shadow-[0_0_15px_rgba(0,212,255,0.15)]')
+                  : savedFlash
+                    ? 'bg-[#22c55e] text-black'
+                    : 'bg-[#00d4ff] text-black hover:bg-[#00b8db] hover:shadow-[0_0_15px_rgba(0,212,255,0.15)]')
               }
             >
-              {saving ? 'Saving...' : 'Save Settings'}
+              {saving ? 'Saving...' : savedFlash ? '✓ Saved' : 'Save Settings'}
             </button>
           </div>
         </div>
@@ -815,30 +755,6 @@ export function ModelSettings() {
             className="rounded-xl border border-[rgba(255,255,255,0.06)] p-6 flex flex-col gap-5 transition-all duration-200 hover:border-[rgba(0,212,255,0.15)]"
             style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}
           >
-            {/* Provider selector */}
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-[10px] uppercase tracking-widest font-mono text-[#a1a1aa] mb-1">
-                External Provider
-              </legend>
-              <div className="grid grid-cols-3 gap-2">
-                {(['openrouter', 'groq', 'custom'] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => handleExternalProviderSwitch(p)}
-                    className={
-                      'px-3 py-2.5 rounded-lg border text-sm font-mono capitalize transition-all duration-150 ' +
-                      (externalProvider === p
-                        ? 'border-[rgba(0,212,255,0.4)] bg-[rgba(0,212,255,0.08)] text-[#00d4ff] shadow-[0_0_12px_rgba(0,212,255,0.06)]'
-                        : 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)] text-[#a1a1aa] hover:border-[rgba(255,255,255,0.12)] hover:text-[#e2e2e5]')
-                    }
-                  >
-                    {p === 'openrouter' ? 'OpenRouter' : p === 'groq' ? 'Groq' : 'Custom'}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-
             {/* API Key */}
             <div className="flex flex-col gap-2">
               <label
@@ -884,22 +800,16 @@ export function ModelSettings() {
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={
-                  externalProvider === 'custom'
-                    ? 'https://api.openai.com/v1 or https://api.together.xyz/v1'
-                    : EXTERNAL_PROVIDER_DEFAULTS[externalProvider]
-                }
+                placeholder="https://api.openai.com/v1 or https://integrate.api.nvidia.com/v1 or https://openrouter.ai/api/v1"
                 className="w-full px-3 py-2.5 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(0,0,0,0.2)] text-[#e2e2e5] text-sm font-mono placeholder-[#52525b] outline-none transition-all duration-150 focus:border-[rgba(0,212,255,0.3)] focus:shadow-[0_0_8px_rgba(0,212,255,0.06)]"
               />
               <span className="text-[10px] font-mono text-[#52525b]">
-                {externalProvider === 'custom'
-                  ? 'Required for custom providers'
-                  : 'Pre-filled — edit only if using a proxy or mirror'}
+                Base URL for any OpenAI-compatible provider — e.g. OpenAI, Together, Anyscale, Nvidia, OpenRouter, Groq
               </span>
             </div>
 
-            {/* Model name with suggestions */}
-            <div className="flex flex-col gap-2 relative">
+            {/* Model name */}
+            <div className="flex flex-col gap-2">
               <label
                 htmlFor="ext-model-name"
                 className="text-[10px] uppercase tracking-widest font-mono text-[#a1a1aa]"
@@ -911,40 +821,9 @@ export function ModelSettings() {
                 type="text"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                placeholder={
-                  externalProvider === 'openrouter'
-                    ? 'e.g. meta-llama/llama-3.2-3b-instruct'
-                    : externalProvider === 'groq'
-                      ? 'e.g. llama-3.2-3b-instant'
-                      : 'e.g. gpt-4o'
-                }
+                placeholder="e.g. gpt-4o, claude-3-5-sonnet, nvidia/nemotron-3.5-lightning, meta-llama/llama-3.2-3b-instruct"
                 className="w-full px-3 py-2.5 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(0,0,0,0.2)] text-[#e2e2e5] text-sm font-mono placeholder-[#52525b] outline-none transition-all duration-150 focus:border-[rgba(0,212,255,0.3)] focus:shadow-[0_0_8px_rgba(0,212,255,0.06)]"
               />
-              {showSuggestions && currentSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#1a1a1a] shadow-lg overflow-hidden">
-                  {currentSuggestions.map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setModelName(suggestion)
-                        setShowSuggestions(false)
-                      }}
-                      className={
-                        'w-full text-left px-3 py-2 text-sm font-mono transition-colors ' +
-                        (modelName === suggestion
-                          ? 'bg-[rgba(0,212,255,0.08)] text-[#00d4ff]'
-                          : 'text-[#a1a1aa] hover:bg-[rgba(255,255,255,0.04)] hover:text-[#e2e2e5]')
-                      }
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Temperature */}
@@ -1033,10 +912,12 @@ export function ModelSettings() {
                 'px-5 py-2.5 rounded-lg text-sm font-mono font-medium transition-all duration-150 ' +
                 (saving || !modelName.trim() || !apiKey.trim()
                   ? 'bg-[#2a2a2a] text-[#52525b] cursor-not-allowed'
-                  : 'bg-[#00d4ff] text-black hover:bg-[#00b8db] hover:shadow-[0_0_15px_rgba(0,212,255,0.15)]')
+                  : savedFlash
+                    ? 'bg-[#22c55e] text-black'
+                    : 'bg-[#00d4ff] text-black hover:bg-[#00b8db] hover:shadow-[0_0_15px_rgba(0,212,255,0.15)]')
               }
             >
-              {saving ? 'Saving...' : 'Save Settings'}
+              {saving ? 'Saving...' : savedFlash ? '✓ Saved' : 'Save Settings'}
             </button>
           </div>
         </div>

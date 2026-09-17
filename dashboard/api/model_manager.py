@@ -268,7 +268,7 @@ class ModelManager:
     async def _call_openrouter(
         self, messages: list[dict[str, str]], stream: bool
     ) -> str | AsyncGenerator[str, None]:
-        base_url = self._resolve_base_url()
+        base_url = self._resolve_base_url().rstrip("/")
         url = f"{base_url}/chat/completions"
         body: dict[str, Any] = {
             "model": self._settings.model_name,
@@ -287,7 +287,7 @@ class ModelManager:
     async def _call_groq(
         self, messages: list[dict[str, str]], stream: bool
     ) -> str | AsyncGenerator[str, None]:
-        base_url = self._resolve_base_url()
+        base_url = self._resolve_base_url().rstrip("/")
         url = f"{base_url}/chat/completions"
         body: dict[str, Any] = {
             "model": self._settings.model_name,
@@ -304,7 +304,7 @@ class ModelManager:
     async def _call_custom(
         self, messages: list[dict[str, str]], stream: bool
     ) -> str | AsyncGenerator[str, None]:
-        base_url = self._resolve_base_url()
+        base_url = self._resolve_base_url().rstrip("/")
         url = f"{base_url}/chat/completions"
         body: dict[str, Any] = {
             "model": self._settings.model_name,
@@ -411,16 +411,28 @@ class ModelManager:
 
             start = time.monotonic()
             try:
+                # Fast path for local Ollama: check tags, no full generate needed
+                # — avoids 80-180s cold-load for a simple "Say ok" test
+                if provider_name in ("ollama", "ollama_local", "ollama_cloud") and not model.endswith(":cloud"):
+                    try:
+                        async with httpx.AsyncClient(timeout=5.0) as client:
+                            resp = await client.get(f"{_OLLAMA_LOCAL_URL}/api/tags")
+                            resp.raise_for_status()
+                            data = resp.json()
+                            raw = data.get("models", []) if isinstance(data, dict) else []
+                            names = [m.get("name", "") for m in raw if isinstance(m, dict)]
+                            if any(model == n or model in n or n in model for n in names):
+                                latency_ms = round((time.monotonic() - start) * 1000)
+                                return {
+                                    "success": True,
+                                    "provider": provider_name,
+                                    "model": model,
+                                    "latency_ms": latency_ms,
+                                    "response_preview": "model available locally",
+                                }
+                    except Exception:
+                        pass
                 result = await self.chat(test_messages, stream=False)
-                latency_ms = round((time.monotonic() - start) * 1000)
-                text = result if isinstance(result, str) else ""
-                return {
-                    "success": True,
-                    "provider": provider_name,
-                    "model": model,
-                    "latency_ms": latency_ms,
-                    "response_preview": text[:100] if text else "",
-                }
             except Exception as exc:
                 latency_ms = round((time.monotonic() - start) * 1000)
                 err_msg = str(exc)
