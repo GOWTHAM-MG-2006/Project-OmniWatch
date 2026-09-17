@@ -1,2 +1,27 @@
-# OmniWatch agent placeholder config (populated in T2)
-agent: {}
+# OmniWatch agent default configuration (Task T2)
+agent:
+  collection_interval: 60s
+  log_level: info
+receiver:
+  hostmetrics:
+    collection_interval: 60s
+  filelog:
+    include:
+      - /var/log/*.log
+  k8s_objects:
+    collection_interval: 15m
+    mode: pull # watch or pull
+    label_selector: ""
+    field_selector: ""
+  k8s_cluster:
+    collection_interval: 10m
+    node_conditions_to_report:
+      - Ready
+      - MemoryPressure
+      - DiskPressure
+      - PIDPressure
+      - NetworkUnavailable
+exporter:
+  otlp:
+    endpoint: otel-collector:4317
+    insecure: true
