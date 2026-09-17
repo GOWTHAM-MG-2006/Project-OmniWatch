@@ -21,12 +21,15 @@ interface IncidentsTimelineProps {
 function groupByHour(raw: TimelinePoint[]) {
   const map = new Map<string, Record<string, unknown>>()
   for (const pt of raw) {
-    const label = pt.hour.length > 13 ? pt.hour.slice(11, 16) : pt.hour
-    if (!map.has(pt.hour)) {
-      map.set(pt.hour, { hour: label, P1: 0, P2: 0, P3: 0, P4: 0 })
+    const hr = typeof pt.hour === 'string' ? pt.hour : String(pt.hour ?? '')
+    if (!hr) continue
+    const label = hr.length > 13 ? hr.slice(11, 16) : hr
+    if (!map.has(hr)) {
+      map.set(hr, { hour: label, P1: 0, P2: 0, P3: 0, P4: 0 })
     }
-    const bucket = map.get(pt.hour)!
-    bucket[pt.severity] = (bucket[pt.severity] as number) + pt.incident_count
+    const bucket = map.get(hr)!
+    const sev = pt.severity ?? 'unknown'
+    bucket[sev] = ((bucket[sev] as number) ?? 0) + (pt.incident_count ?? 0)
   }
   return Array.from(map.values())
 }

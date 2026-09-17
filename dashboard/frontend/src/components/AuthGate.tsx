@@ -109,7 +109,7 @@ export function AuthGate({ service, onAuth, children }: AuthGateProps) {
                 <label className="block text-xs text-text-muted mb-1">User</label>
                 <input
                   name="user"
-                  defaultValue="default"
+                  defaultValue="omniwatch"
                   className="w-full px-3 py-2 text-sm bg-[#0a0a0f] border border-[#2a2a2a] rounded font-mono"
                   required
                 />
@@ -119,6 +119,7 @@ export function AuthGate({ service, onAuth, children }: AuthGateProps) {
                 <input
                   name="password"
                   type="password"
+                  defaultValue="omniwatch"
                   className="w-full px-3 py-2 text-sm bg-[#0a0a0f] border border-[#2a2a2a] rounded font-mono"
                 />
               </div>

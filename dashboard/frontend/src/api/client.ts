@@ -134,8 +134,17 @@ export async function fetchSummary(params?: { timeRange?: string; hours?: number
 }
 
 export async function fetchSeverityDistribution(params?: { timeRange?: string; hours?: number }): Promise<SeverityDistributionResponse> {
-  const { data } = await api.get<SeverityDistributionResponse>('/dashboard/severity-distribution', { params })
-  return data
+  const { data } = await api.get<{
+    distribution: Array<SeverityDistribution & { s?: string; c?: number }>;
+    timestamp: string
+  }>('/dashboard/severity-distribution', { params })
+  // Backend may return abbreviated keys ({s, c}) instead of ({severity, cnt})
+  // depending on the running image — normalize both shapes here.
+  const distribution = (data.distribution ?? []).map((d) => ({
+    severity: d.severity ?? d.s ?? 'unknown',
+    cnt: Number(d.cnt ?? d.c ?? 0),
+  }))
+  return { distribution, timestamp: data.timestamp }
 }
 
 export async function fetchIncidentsTimeline(params?: { timeRange?: string; hours?: number }): Promise<TimelineResponse> {
@@ -154,8 +163,18 @@ export async function fetchIncidentsTimeline(params?: { timeRange?: string; hour
   } else {
     p.hours = 24
   }
-  const { data } = await api.get<TimelineResponse>('/dashboard/incidents-timeline', { params: p })
-  return data
+  const { data } = await api.get<{
+    timeline: Array<TimelinePoint & { h?: string; i?: number; s?: string }>;
+    count: number;
+    timestamp: string
+  }>('/dashboard/incidents-timeline', { params: p })
+  // Normalize abbreviated keys ({h, i, s}) to ({hour, incident_count, severity}).
+  const timeline = (data.timeline ?? []).map((t) => ({
+    hour: String(t.hour ?? t.h ?? ''),
+    incident_count: Number(t.incident_count ?? t.i ?? 0),
+    severity: t.severity ?? t.s ?? 'unknown',
+  }))
+  return { timeline, count: timeline.length, timestamp: data.timestamp }
 }
 
 export async function fetchIncidents(params?: {
@@ -228,7 +247,7 @@ export interface MinioObjectsResponse {
 }
 
 export async function fetchMinioBuckets(): Promise<MinioBucketsResponse> {
-  const { data } = await api.get<MinioBucketsResponse>('/minio/buckets')
+  const { data } = await api.get<MinioBucketsResponse>('/minio/buckets', { headers: minioHeaders() })
   return data
 }
 
@@ -238,7 +257,7 @@ export async function fetchMinioObjects(params: {
   limit?: number
   offset?: number
 }): Promise<MinioObjectsResponse> {
-  const { data } = await api.get<MinioObjectsResponse>('/minio/objects', { params, timeout: 8000 })
+  const { data } = await api.get<MinioObjectsResponse>('/minio/objects', { params, headers: minioHeaders(), timeout: 8000 })
   return data
 }
 
@@ -327,11 +346,11 @@ export interface ClickHouseQueryResult {
 }
 
 export interface ClickHouseTableInfo {
-  database: string
   name: string
-  engine: string
-  row_count: number
-  total_bytes: number
+  database?: string
+  engine?: string
+  row_count?: number
+  total_bytes?: number
 }
 
 export interface ClickHouseSchemaColumn {
@@ -355,12 +374,31 @@ export async function clickhouseQuery(query: string, limit = 100): Promise<Click
 
 export async function clickhouseTables(): Promise<{ tables: ClickHouseTableInfo[]; count: number }> {
   const { data } = await api.get('/clickhouse/tables', { headers: chHeaders(), timeout: 10_000 })
-  return data
+  // Live backend abbreviates table keys as {d,n,e} (contract drift, same as
+  // timeline {h,i,s}); normalize both shapes so the table list renders names.
+  const rawTables = (data?.tables ?? []) as Array<ClickHouseTableInfo & { d?: string; n?: string; e?: string }>
+  const tables: ClickHouseTableInfo[] = rawTables.map((t) => ({
+    name: t.name ?? t.n ?? '',
+    database: t.database ?? t.d ?? '',
+    engine: t.engine ?? t.e ?? '',
+    row_count: t.row_count,
+    total_bytes: t.total_bytes,
+  }))
+  return { tables, count: data?.count ?? tables.length }
 }
 
 export async function clickhouseSchema(tableName: string): Promise<{ table: string; columns: ClickHouseSchemaColumn[] }> {
   const { data } = await api.get(`/clickhouse/schema/${encodeURIComponent(tableName)}`, { headers: chHeaders(), timeout: 10_000 })
-  return data
+  // Live backend abbreviates column keys as {n,t,d,c}; normalize both shapes.
+  const rawCols = (data?.columns ?? []) as Array<ClickHouseSchemaColumn & { n?: string; t?: string; d?: string; c?: string }>
+  const columns: ClickHouseSchemaColumn[] = rawCols.map((c) => ({
+    name: c.name ?? c.n ?? '',
+    type: c.type ?? c.t ?? '',
+    default_kind: c.default_kind ?? '',
+    default_expression: c.default_expression ?? c.d ?? '',
+    comment: c.comment ?? c.c ?? '',
+  }))
+  return { table: data?.table ?? tableName, columns }
 }
 
 // ── Neo4j console ──────────────────────────────────────────────────

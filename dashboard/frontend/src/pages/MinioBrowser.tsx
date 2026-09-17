@@ -36,6 +36,12 @@ export function MinioBrowser() {
   const [actionErr, setActionErr] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [previewName, setPreviewName] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewText, setPreviewText] = useState<string | null>(null)
+  const [previewKind, setPreviewKind] = useState<'image' | 'text' | 'pdf' | 'other'>('other')
+  const [previewLoading, setPreviewLoading] = useState(false)
+
   const loadBuckets = useCallback(async () => {
     setBucketsLoading(true)
     setBucketsError(null)
@@ -118,6 +124,51 @@ export function MinioBrowser() {
     } finally {
       setUploading(false)
     }
+  }
+
+  const handlePreview = async (objName: string) => {
+    if (!selectedBucket) return
+    setPreviewLoading(true)
+    setActionErr(null)
+    try {
+      const blob = await minioDownload(selectedBucket, objName)
+      const ext = objName.split('.').pop()?.toLowerCase() ?? ''
+      const mime = blob.type || ''
+      const isImage = mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)
+      const isPdf = mime === 'application/pdf' || ext === 'pdf'
+      const isText = mime.startsWith('text/') || mime.includes('json') || ['txt', 'log', 'json', 'csv', 'md', 'xml', 'yaml', 'yml', 'js', 'ts', 'tsx', 'py', 'html', 'css', 'conf', 'env'].includes(ext)
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (isImage) {
+        setPreviewUrl(URL.createObjectURL(blob))
+        setPreviewText(null)
+        setPreviewKind('image')
+      } else if (isPdf) {
+        setPreviewUrl(URL.createObjectURL(blob))
+        setPreviewText(null)
+        setPreviewKind('pdf')
+      } else if (isText) {
+        const text = await blob.text()
+        setPreviewText(text.slice(0, 20000))
+        setPreviewUrl(null)
+        setPreviewKind('text')
+      } else {
+        setPreviewUrl(URL.createObjectURL(blob))
+        setPreviewText(null)
+        setPreviewKind('other')
+      }
+      setPreviewName(objName)
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Preview failed')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+    setPreviewText(null)
+    setPreviewName(null)
   }
 
   const handleDownload = async (objName: string) => {
@@ -354,6 +405,13 @@ export function MinioBrowser() {
                               <td className="px-3 py-1.5 text-right">
                                 <div className="flex items-center justify-end gap-1">
                                   <button
+                                    onClick={() => handlePreview(o.name)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-accent-cyan/10 text-accent-cyan/60 hover:text-accent-cyan transition-colors"
+                                    title="Preview"
+                                  >
+                                    👁
+                                  </button>
+                                  <button
                                     onClick={() => handleDownload(o.name)}
                                     className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-accent-cyan/10 text-accent-cyan/60 hover:text-accent-cyan transition-colors"
                                     title="Download"
@@ -399,6 +457,41 @@ export function MinioBrowser() {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+      {previewLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="text-sm text-text-muted font-mono animate-pulse">Loading preview...</div>
+        </div>
+      )}
+      {previewName && !previewLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closePreview}>
+          <div className="card rounded-lg border border-[#2a2a2a] bg-[#0a0a0f] max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-3 py-2 flex items-center gap-2 border-b border-[#2a2a2a]">
+              <span className="text-xs font-mono text-text-primary truncate flex-1" title={previewName}>{previewName}</span>
+              <button
+                onClick={() => { if (selectedBucket && previewName) handleDownload(previewName) }}
+                className="px-2 py-1 text-[10px] font-mono rounded bg-accent-cyan/10 hover:bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/30"
+              >
+                Download
+              </button>
+              <button onClick={closePreview} className="px-2 py-1 text-xs rounded border border-[#2a2a2a] hover:border-red-900/40 text-text-muted">✕</button>
+            </div>
+            <div className="overflow-auto p-3 flex-1">
+              {previewKind === 'image' && previewUrl ? (
+                <img src={previewUrl} alt={previewName} className="max-w-full max-h-[60vh] mx-auto rounded" />
+              ) : previewKind === 'pdf' && previewUrl ? (
+                <iframe src={previewUrl} title={previewName} className="w-full h-[60vh] rounded bg-white" />
+              ) : previewKind === 'text' && previewText !== null ? (
+                <pre className="text-xs font-mono whitespace-pre-wrap break-words text-text-primary">{previewText}</pre>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-sm text-text-muted">No inline preview for this file type.</div>
+                  <div className="text-xs text-text-muted/70 mt-1 font-mono">Use Download to view it locally.</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

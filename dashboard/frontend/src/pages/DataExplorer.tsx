@@ -90,7 +90,7 @@ export function DataExplorer() {
                   className={`w-full text-left px-3 py-2 text-xs font-mono hover:bg-[#1a1a1a] transition-colors ${selectedTable === t.name ? 'bg-accent-cyan/10 border-l-2 border-accent-cyan' : 'border-l-2 border-transparent'}`}
                 >
                   <div className={`truncate ${selectedTable === t.name ? 'text-accent-cyan' : 'text-text-primary'}`}>{t.name}</div>
-                  <div className="text-[10px] text-text-muted">{t.engine} · {t.row_count.toLocaleString()} rows</div>
+                  <div className="text-[10px] text-text-muted">{t.engine ?? '—'}{typeof t.row_count === 'number' ? ` · ${t.row_count.toLocaleString()} rows` : ''}</div>
                 </button>
               ))}
             </div>
