@@ -67,8 +67,8 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
     environment:
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ulimits:
       nofile:
@@ -89,7 +89,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/omniwatch
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-omniwatch}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
     volumes:
@@ -102,7 +102,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: omniwatch-minio
     networks:
       - omniwatch-network
@@ -110,8 +110,8 @@ services:
       - "9001:9001"
       - "19000:9010"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --address ":9010" --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -123,7 +123,7 @@ services:
       start_period: 30s
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.32.15
     container_name: omniwatch-ollama
     runtime: nvidia
     environment:
@@ -144,7 +144,7 @@ services:
       start_period: 60s
 
   opa:
-    image: openpolicyagent/opa:latest-static
+    image: openpolicyagent/opa:1.19.1-static
     container_name: omniwatch-opa
     networks:
       - omniwatch-network
@@ -166,7 +166,7 @@ services:
       start_period: 15s
 
   otelcol:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.159.0
     container_name: omniwatch-otelcol
     networks:
       - omniwatch-network
@@ -263,14 +263,14 @@ services:
   # MinIO Bucket Init — creates required buckets before Flink starts
   # ---------------------------------------------------------------------------
   minio-bucket-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-09-07T16-13-09Z
     container_name: omniwatch-minio-init
     networks:
       - omniwatch-network
     entrypoint: ["sh", "-c"]
     command: >
       "sleep 5 &&
-       mc alias set omniwatch http://minio:9010 minioadmin minioadmin &&
+       mc alias set omniwatch http://minio:9010 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
        mc mb omniwatch/omniwatch-telemetry-archive --ignore-existing &&
        mc mb omniwatch/omniwatch-incidents --ignore-existing &&
        mc mb omniwatch/omniwatch-audit-logs --ignore-existing &&
@@ -301,7 +301,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
     depends_on:
       kafka:
         condition: service_healthy
@@ -331,7 +331,7 @@ services:
     environment:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -358,15 +358,15 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: omniwatch
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_SECURE: "false"
       MINIO_CONSOLE_PORT: 9001
       PREDICTIVE_ANOMALY_SCORE_THRESHOLD: 0.5
@@ -407,13 +407,13 @@ services:
       KAFKA_GROUP_ID: omniwatch-causal-group
       KAFKA_AUTO_OFFSET_RESET: earliest
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: omniwatch
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       CAUSAL_MAX_DEPTH: 10
       CAUSAL_MIN_CONFIDENCE: 0.3
     depends_on:
@@ -450,14 +450,14 @@ services:
       KAFKA_AUTO_OFFSET_RESET: earliest
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       DEDUP_TTL_SECONDS: 300
       DEDUP_ENABLED: "true"
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_INCIDENTS_BUCKET: omniwatch-incidents
       MINIO_SECURE: "false"
       PRIORITIZATION_API_PORT: 8009
@@ -491,12 +491,12 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_SECURE: "false"
       MINIO_AUTO_CREATE: "true"
       OLLAMA_URL: http://ollama:11434
@@ -533,12 +533,12 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_SECURE: "false"
       MINIO_AUTO_CREATE: "true"
       OLLAMA_URL: http://ollama:11434
@@ -580,15 +580,15 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: omniwatch
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_SECURE: "false"
       DASHBOARD_PORT: "8011"
       OLLAMA_URL: http://ollama:11434
@@ -653,14 +653,14 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
       OPA_URL: http://opa:8181
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: omniwatch
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_SECURE: "false"
       OMNIWATCH_APPROVAL_SELECT_PENDING: "true"
       OMNIWATCH_APPROVAL_UPDATE_DECISION: "true"
@@ -701,12 +701,12 @@ services:
       KAFKA_AUTO_OFFSET_RESET: earliest
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
-      CLICKHOUSE_DB: omniwatch
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: omniwatch
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       LEARNING_API_PORT: "8030"
       PATTERN_MINING_INTERVAL: "900"
     depends_on:
@@ -728,7 +728,7 @@ services:
   # Beyla — eBPF auto-instrumentation sidecar (Phase 1)
   # ---------------------------------------------------------------------------
   beyla:
-    image: grafana/beyla:latest
+    image: grafana/beyla:3.35.0
     container_name: omniwatch-beyla
     networks:
       - omniwatch-network
