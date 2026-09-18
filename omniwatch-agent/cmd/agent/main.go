@@ -17,7 +17,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/omniwatch/omniwatch-agent/internal/collector"
 	"github.com/omniwatch/omniwatch-agent/internal/config"
+	"github.com/omniwatch/omniwatch-agent/internal/exporter"
 	"github.com/omniwatch/omniwatch-agent/internal/health"
 )
 
@@ -54,18 +56,30 @@ func run() int {
 		"log_level", cfg.Agent.LogLevel,
 		"collection_interval", cfg.Agent.CollectionInterval.String())
 
-	// Wiring point (T4): full OTel SDK initialization lives in T4.
-	// Until then, only record the self-telemetry export target from config.
+	// OTel SDK initialization (T4): trace, meter and logger providers
+	// exporting via OTLP gRPC to the endpoint from config.
 	otlpEndpoint := cfg.Exporter.OTLP.Endpoint
-	logger.Info("self-telemetry OTLP export configured (stub)",
+	expCtx, expCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	otelExp, err := exporter.New(expCtx, otlpEndpoint, cfg.Exporter.OTLP.Insecure)
+	expCancel()
+	if err != nil {
+		logger.Error("otel SDK initialization failed", "error", err)
+		return 1
+	}
+	logger.Info("otel SDK initialized",
 		"endpoint", otlpEndpoint,
 		"insecure", cfg.Exporter.OTLP.Insecure,
-		"note", "full OTel SDK wiring lands in T4")
+		"service_name", exporter.ServiceName,
+		"service_version", exporter.ServiceVersion)
 
-	// Wiring point (T5): internal/collector has no API yet; this stub marks
-	// where collector.New/collector.Start will be called.
 	healthSrv := health.NewServer()
-	initCollectorStub(logger, healthSrv)
+	coll := collector.New(cfg, otelExp, logger)
+	if err := coll.Start(context.Background()); err != nil {
+		logger.Error("collector start failed", "error", err)
+		healthSrv.SetCollectorStatus(health.CollectorDegraded)
+	} else {
+		healthSrv.SetCollectorStatus(health.CollectorRunning)
+	}
 
 	httpSrv := &http.Server{
 		Addr:         healthAddr,
@@ -107,17 +121,17 @@ func run() int {
 		return 1
 	}
 
-	// Wiring point (T5): collector.Stop() goes here once the collector exists.
+	logger.Info("stopping collector")
+	if err := coll.Shutdown(ctx); err != nil {
+		logger.Error("collector shutdown failed", "error", err)
+	}
+	logger.Info("shutting down otel SDK")
+	if err := otelExp.Shutdown(ctx); err != nil {
+		logger.Error("otel SDK shutdown failed", "error", err)
+	}
 	healthSrv.SetCollectorStatus(health.CollectorStopped)
 	logger.Info("shutdown complete")
 	return 0
-}
-
-// initCollectorStub stands in for collector initialization until T5 provides
-// the real collector API. It marks the agent ready so /ready serves 200.
-func initCollectorStub(logger *slog.Logger, healthSrv *health.Server) {
-	logger.Info("collector initialized (stub)", "note", "real collector wiring lands in T5")
-	healthSrv.SetCollectorStatus(health.CollectorRunning)
 }
 
 // loadConfig resolves the config path (--config flag > AGENT_CONFIG env >
