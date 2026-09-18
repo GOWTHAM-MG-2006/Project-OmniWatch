@@ -1,0 +1,92 @@
+# OmniWatch agent alerting rules (IND-5).
+# Shape: PrometheusRule (groups + rules with expr/for/labels/annotations).
+# There is intentionally NO Prometheus server or Alertmanager in this stack:
+# the otelcol rule processor loads this file and evaluates the rules against
+# OTLP metrics arriving from the agent. Metric names below are the real
+# in-code names: omniwatch.agent.heartbeat (collector.go),
+# omniwatch.agent.queue_dropped (resilience.QueueDroppedMetric, IND-2).
+# Breaker state has no OTel counter in IND-2; the alerting package maps
+# CircuitBreaker.State() to the omniwatch.agent.breaker_state gauge
+# (0 = closed, 1 = open, 2 = half-open) — see internal/alerting.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: omniwatch-agent-alerts
+  namespace: omniwatch
+  labels:
+    app: omniwatch-agent
+    phase: industry-ready
+spec:
+  groups:
+    - name: omniwatch-agent.health
+      interval: 30s
+      rules:
+        - alert: AgentHealthDown
+          expr: up{job="omniwatch-agent"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: health
+          annotations:
+            summary: "omniwatch-agent /health probe failing"
+            description: "The agent liveness probe :8080/health has been down for more than 2 minutes."
+            runbook: "README.md#runbook-agenthealthdown"
+        - alert: AgentHeartbeatMissing
+          expr: absent(omniwatch_agent_heartbeat_total) == 1
+          for: 5m
+          labels:
+            severity: critical
+            component: collector
+          annotations:
+            summary: "No agent heartbeat metrics arriving at otelcol"
+            description: "No omniwatch.agent.heartbeat datapoints for 5 minutes; the collector loop or the OTLP path is dead."
+            runbook: "README.md#runbook-agentheartbeatmissing"
+    - name: omniwatch-agent.export
+      interval: 30s
+      rules:
+        - alert: AgentOTLPExportFailing
+          expr: rate(omniwatch_agent_heartbeat_total[5m]) == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: exporter
+          annotations:
+            summary: "Agent OTLP export success rate collapsed"
+            description: "Heartbeat export rate is zero over 5 minutes; OTLP gRPC to the collector endpoint is failing (see retry 100ms/500ms/2s + breaker 5 errs/30s, IND-2)."
+            runbook: "README.md#runbook-agentotlpexportfailing"
+        - alert: AgentExportLatencyHigh
+          expr: histogram_quantile(0.99, rate(omniwatch_agent_export_duration_seconds_bucket[5m])) > 5
+          for: 10m
+          labels:
+            severity: warning
+            component: exporter
+          annotations:
+            summary: "Agent OTLP export p99 latency above SLO"
+            description: "p99 export latency exceeds the 5s SLO for 10 minutes; the endpoint is slow or the retry backoff is saturated."
+            runbook: "README.md#runbook-agentexportlatencyhigh"
+    - name: omniwatch-agent.queue
+      interval: 30s
+      rules:
+        - alert: AgentQueueDropping
+          expr: rate(omniwatch_agent_queue_dropped_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: collector
+          annotations:
+            summary: "Agent bounded queue is dropping telemetry"
+            description: "omniwatch.agent.queue_dropped is increasing: the bounded heartbeat queue (drop-oldest, IND-2) is full because export is slower than collection."
+            runbook: "README.md#runbook-agentqueuedropping"
+    - name: omniwatch-agent.breaker
+      interval: 30s
+      rules:
+        - alert: AgentCircuitBreakerOpen
+          expr: omniwatch_agent_breaker_state == 1
+          for: 1m
+          labels:
+            severity: critical
+            component: resilience
+          annotations:
+            summary: "Agent OTLP circuit breaker is open"
+            description: "The gobreaker circuit (5 consecutive errors / 30s window, IND-2) is open; exports fail fast without touching the endpoint."
+            runbook: "README.md#runbook-agentcircuitbreakeropen"
