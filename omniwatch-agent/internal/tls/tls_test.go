@@ -398,6 +398,40 @@ func TestRotationLoopFires(t *testing.T) {
 	}
 }
 
+func TestRotationSurvivesCancelledParent(t *testing.T) {
+	pki := newTestPKI(t)
+	dir := t.TempDir()
+	certDER, keyDER := pki.mintLeaf(t)
+	opts := fileOpts(t, pki, dir, certDER, keyDER)
+	opts.CertRotationInterval = 50 * time.Millisecond
+
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer setupCancel()
+	creds, err := NewTLSCredentials(setupCtx, opts, slog.Default())
+	if err != nil {
+		t.Fatalf("NewTLSCredentials: %v", err)
+	}
+	defer creds.Close()
+	before := creds.LastRotation()
+
+	// Mirror exporter.New wiring: the parent ctx is cancelled right after
+	// setup (main.go expCancel). Rotation must still fire on the detached ctx.
+	parent, cancel := context.WithCancel(context.Background())
+	creds.StartRotation(context.WithoutCancel(parent))
+	cancel()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if creds.LastRotation().After(before) {
+			return // detached rotation fired despite parent cancel
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rotation died with parent ctx: LastRotation stuck at %v", before)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestInsecureFallbackGating(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))

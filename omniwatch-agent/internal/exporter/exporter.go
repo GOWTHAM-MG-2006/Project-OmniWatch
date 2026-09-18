@@ -83,7 +83,9 @@ func New(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.O
 			return nil, fmt.Errorf("exporter: mTLS credentials: %w", err)
 		}
 		tlsCreds = tc
-		tlsCreds.StartRotation(ctx)
+		// The caller's ctx is cancelled right after New returns (main.go
+		// expCancel), so detach: rotation lives until Shutdown closes it.
+		tlsCreds.StartRotation(context.WithoutCancel(ctx))
 		traceOpts = append(traceOpts, otlptracegrpc.WithTLSCredentials(creds))
 		metricOpts = append(metricOpts, otlpmetricgrpc.WithTLSCredentials(creds))
 		logOpts = append(logOpts, otlploggrpc.WithTLSCredentials(creds))
