@@ -1,0 +1,19 @@
+# OmniWatch — IND-9 E2E compose override (override file ONLY).
+#
+# Rules: NEVER edit the committed docker-compose.yml for E2E. This file only
+# adds environment knobs consumed by the existing services:
+#   * agent runs dev auth + insecure OTLP fallback (IND-1/IND-3: avoids cert
+#     friction; the negative mTLS/apikey cases are asserted at unit level).
+#   * prioritization keeps GAP-3 dedup enabled with the 5-minute TTL.
+# No new services, no port changes, no volume changes.
+# Validate: docker compose -f docker-compose.yml -f tests/e2e/docker-compose.e2e.yml config
+
+services:
+  omniwatch-agent:
+    environment:
+      - OMNIWATCH_AUTH_MODE=dev
+      - OMNIWATCH_EXPORTER_OTLP_INSECURE=true
+  prioritization:
+    environment:
+      DEDUP_ENABLED: "true"
+      DEDUP_TTL_SECONDS: 300

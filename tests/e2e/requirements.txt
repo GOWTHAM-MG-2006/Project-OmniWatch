@@ -1,0 +1,14 @@
+# OmniWatch — IND-9 E2E test dependencies.
+#
+# No docker-compose/testcontainers Python packages are used on purpose:
+# the harness drives the `docker` CLI via stdlib subprocess (Windows-safe)
+# and probes health endpoints via stdlib urllib. Everything below is
+# already covered by the root requirements.txt or the standard library.
+#
+# Root requirements (already present):
+#   pytest>=9.0.0
+#   pytest-asyncio>=1.3.0
+#
+# Standard library only: subprocess, urllib.request, uuid, pathlib, time.
+# Optional live paths need nothing else. Go suites (resilience/tls) run via
+# the Go toolchain at E:\Go\bin\go.exe — no Python package required.
