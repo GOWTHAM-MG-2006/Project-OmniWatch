@@ -741,3 +741,24 @@ services:
         condition: service_started
     cap_add:
       - SYS_ADMIN
+
+  # ---------------------------------------------------------------------------
+  # OmniWatch Agent — Phase 1 (host/K8s telemetry collector, OTLP → otelcol)
+  # ---------------------------------------------------------------------------
+  omniwatch-agent:
+    build: ./omniwatch-agent
+    container_name: omniwatch-agent
+    networks:
+      - omniwatch-network
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/log/pods:/var/log/pods:ro
+      - /var/log/containers:/var/log/containers:ro
+      - /var/log/kubernetes/audit:/var/log/kubernetes/audit:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - OMNIWATCH_EXPORTER_OTLP_ENDPOINT=otelcol:4317
+      - AGENT_CONFIG=/etc/omniwatch/agent.yaml
+    depends_on:
+      - otelcol
