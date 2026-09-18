@@ -172,6 +172,24 @@ curl http://localhost:8080/health
 docker stop agent-test && docker rm agent-test
 ```
 
+### Supply Chain (SBOM / cosign / reproducible build)
+
+```bash
+# Reproducible build (pinned epoch → same digest across rebuilds)
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) make build-reproducible
+
+# SPDX 2.3 SBOM (requires syft)
+make sbom   # → sbom.spdx.json
+
+# Keyless sign + verify (requires cosign, OIDC in CI)
+make sign
+make verify   # E2E pipeline note: run `cosign verify <image>` after deploy
+```
+
+Tag pushes (`v*`) trigger `.github/workflows/supply-chain.yml`: reproducible
+build → SBOM (anchore/sbom-action) → keyless cosign sign → SBOM attached to
+the release.
+
 ---
 
 ## Kubernetes Deployment
