@@ -723,3 +723,21 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Beyla — eBPF auto-instrumentation sidecar (Phase 1)
+  # ---------------------------------------------------------------------------
+  beyla:
+    image: grafana/beyla:latest
+    container_name: omniwatch-beyla
+    networks:
+      - omniwatch-network
+    volumes:
+      - ./omniwatch-agent/configs/beyla-config.yaml:/etc/beyla/config.yaml
+    environment:
+      BEYLA_CONFIG_PATH: /etc/beyla/config.yaml
+    depends_on:
+      otelcol:
+        condition: service_started
+    cap_add:
+      - SYS_ADMIN

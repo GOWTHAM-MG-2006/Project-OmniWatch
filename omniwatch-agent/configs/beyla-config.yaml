@@ -1,0 +1,10 @@
+executable_name: ""
+openTelemetry:
+  attributes:
+    k8s.namespace.name: true
+    k8s.pod.name: true
+    k8s.deployment.name: true
+  exporter:
+    otlp:
+      endpoint: otelcol:4317
+      insecure: true
