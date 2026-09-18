@@ -40,6 +40,16 @@ spec:
       containers:
       - name: omniwatch-agent
         image: omniwatch-agent:latest
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          oomScoreAdj: -100
+          memorySwap: {}
         ports:
         - containerPort: 8080
           name: health
@@ -62,17 +72,30 @@ spec:
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /ready
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
       - name: beyla
         image: grafana/beyla:latest
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
         env:
           - name: BEYLA_CONFIG_PATH
             value: /etc/beyla/config.yaml
+        # Beyla requires privileged:true for eBPF (SYS_ADMIN) — agent container stays non-root + read-only;
+        # see README Beyla section.
         securityContext:
           privileged: true
         volumeMounts:
