@@ -1,0 +1,49 @@
+# OmniWatch — Phase 1 omniwatch-agent
+# Component: RBAC (ServiceAccount + ClusterRole + ClusterRoleBinding)
+# Plan checkbox: - [ ] 10. K8s DaemonSet Manifest (Non-Root, ReadOnlyRootFilesystem)
+# Plan-verbatim block (lines 969-1001). RBAC mirrors the T7 `objects:` list
+# (9 kinds: pods/nodes/services/endpoints/namespaces/deployments/replicasets/
+# daemonsets/statefulsets) + events — cross-checked against
+# omniwatch-agent/configs/agent.yaml receiver.k8s_objects.objects.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: omniwatch-agent
+  namespace: omniwatch
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: omniwatch-agent
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes", "services", "endpoints", "namespaces", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: omniwatch-agent
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: omniwatch-agent
+subjects:
+- kind: ServiceAccount
+  name: omniwatch-agent
+  namespace: omniwatch

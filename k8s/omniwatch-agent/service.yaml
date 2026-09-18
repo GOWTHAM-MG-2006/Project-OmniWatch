@@ -1,0 +1,19 @@
+# OmniWatch — Phase 1 omniwatch-agent
+# Component: omniwatch-agent Service (health checks)
+apiVersion: v1
+kind: Service
+metadata:
+  name: omniwatch-agent
+  namespace: omniwatch
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: health
+  selector:
+    app: omniwatch-agent

@@ -1,0 +1,122 @@
+# OmniWatch — Phase 1 omniwatch-agent
+# Component: omniwatch-agent DaemonSet (non-root, read-only root FS) + Beyla sidecar
+# Plan checkbox: - [ ] 10. K8s DaemonSet Manifest (Non-Root, ReadOnlyRootFilesystem)
+# NOTE (runAsUser): plan line 925 says runAsUser 65534, but T9 PROVED the
+# distroless runtime user `nonroot` is UID 65532 (evidence
+# .omo/evidence/task-9-nonroot.txt, /etc/passwd extraction:
+# nonroot:x:65532:65532). runAsUser: 65532 is used so the K8s identity MATCHES
+# the image USER. Everything else stays plan-verbatim.
+# NOTE (Beyla): sidecar container verbatim from the `## 2026-09-18 Task: T8`
+# entry in .omo/notepads/omniwatch-agent/learnings.md, cross-checked against
+# omniwatch-agent/README.md "K8s Sidecar Container Snippet (T10 Embed)".
+# Choice: the beyla ConfigMap is defined as a second `---` document in THIS
+# file (self-contained; plan fixes the file list at
+# daemonset/rbac/service/README so no extra configmap.yaml file).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: omniwatch-agent
+  namespace: omniwatch
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+spec:
+  selector:
+    matchLabels:
+      app: omniwatch-agent
+  template:
+    metadata:
+      labels:
+        app: omniwatch-agent
+        tier: backend
+        phase: "1"
+    spec:
+      serviceAccountName: omniwatch-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        readOnlyRootFilesystem: true
+      containers:
+      - name: omniwatch-agent
+        image: omniwatch-agent:latest
+        ports:
+        - containerPort: 8080
+          name: health
+        env:
+        - name: OMNIWATCH_EXPORTER_OTLP_ENDPOINT
+          value: "otelcol.omniwatch:4317"
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: containers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: k8s-audit
+          mountPath: /var/log/kubernetes/audit
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      - name: beyla
+        image: grafana/beyla:latest
+        env:
+          - name: BEYLA_CONFIG_PATH
+            value: /etc/beyla/config.yaml
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - name: beyla-config
+            mountPath: /etc/beyla/config.yaml
+            subPath: beyla-config.yaml
+            readOnly: true
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: containers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: k8s-audit
+        hostPath:
+          path: /var/log/kubernetes/audit
+      - name: beyla-config
+        configMap:
+          name: omniwatch-beyla-config
+---
+# Self-contained Beyla config (inline copy of
+# omniwatch-agent/configs/beyla-config.yaml, byte-identical to the T8 plan
+# block). Alternative: create it imperatively with
+#   kubectl create configmap omniwatch-beyla-config \
+#     --from-file=beyla-config.yaml=omniwatch-agent/configs/beyla-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omniwatch-beyla-config
+  namespace: omniwatch
+  labels:
+    app: omniwatch-agent
+    tier: backend
+    phase: "1"
+data:
+  beyla-config.yaml: |
+    executable_name: ""
+    openTelemetry:
+      attributes:
+        k8s.namespace.name: true
+        k8s.pod.name: true
+        k8s.deployment.name: true
+      exporter:
+        otlp:
+          endpoint: otelcol:4317
+          insecure: true
