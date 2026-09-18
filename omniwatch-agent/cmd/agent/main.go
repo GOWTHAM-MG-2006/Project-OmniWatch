@@ -22,6 +22,7 @@ import (
 	"github.com/omniwatch/omniwatch-agent/internal/config"
 	"github.com/omniwatch/omniwatch-agent/internal/exporter"
 	"github.com/omniwatch/omniwatch-agent/internal/health"
+	agenttls "github.com/omniwatch/omniwatch-agent/internal/tls"
 )
 
 const (
@@ -65,8 +66,13 @@ func run() int {
 	// OTel SDK initialization (T4): trace, meter and logger providers
 	// exporting via OTLP gRPC to the endpoint from config.
 	otlpEndpoint := cfg.Exporter.OTLP.Endpoint
+	tlsOpts := agenttls.Options{
+		SpiffeSocketPath:     cfg.TLS.SpiffeSocketPath,
+		TrustDomain:          cfg.TLS.TrustDomain,
+		CertRotationInterval: cfg.TLS.CertRotationInterval,
+	}
 	expCtx, expCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	otelExp, err := exporter.New(expCtx, otlpEndpoint, cfg.Exporter.OTLP.Insecure)
+	otelExp, err := exporter.New(expCtx, otlpEndpoint, cfg.Exporter.OTLP.Insecure, tlsOpts)
 	expCancel()
 	if err != nil {
 		logger.Error("otel SDK initialization failed", "error", err)

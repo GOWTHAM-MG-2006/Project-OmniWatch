@@ -53,3 +53,7 @@ exporter:
   otlp:
     endpoint: otel-collector:4317
     insecure: true
+tls:
+  cert_rotation_interval: 24h
+  spiffe_socket_path: "unix:///tmp/spire-agent/public/api.sock"
+  trust_domain: "example.org"

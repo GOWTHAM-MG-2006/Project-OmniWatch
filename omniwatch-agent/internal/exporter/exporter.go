@@ -9,9 +9,11 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
+	agenttls "github.com/omniwatch/omniwatch-agent/internal/tls"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -47,14 +49,16 @@ type Exporter struct {
 	tp       *sdktrace.TracerProvider
 	mp       *sdkmetric.MeterProvider
 	lp       *sdklog.LoggerProvider
+	tlsCreds *agenttls.TLSCredentials
 }
 
 // New initializes the OTel SDK with OTLP gRPC exporters for traces, metrics
 // and logs. endpoint is used verbatim (e.g. "otel-collector:4317"); when
-// insecure is true the gRPC connection skips TLS. Resource attributes
-// (service.name, service.version, deployment.environment, host.name,
-// k8s.pod.name, k8s.namespace.name) are attached to every signal.
-func New(ctx context.Context, endpoint string, insecure bool) (*Exporter, error) {
+// insecure is true the gRPC connection skips TLS (dev-only fallback with a
+// loud warning), otherwise mTLS credentials are built from tlsOpts via SPIRE.
+// Resource attributes (service.name, service.version, deployment.environment,
+// host.name, k8s.pod.name, k8s.namespace.name) are attached to every signal.
+func New(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.Options) (*Exporter, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("exporter: OTLP endpoint is empty")
 	}
@@ -67,10 +71,22 @@ func New(ctx context.Context, endpoint string, insecure bool) (*Exporter, error)
 	traceOpts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint)}
 	metricOpts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(endpoint)}
 	logOpts := []otlploggrpc.Option{otlploggrpc.WithEndpoint(endpoint)}
+	var tlsCreds *agenttls.TLSCredentials
 	if insecure {
+		slog.Warn(agenttls.InsecureFallbackWarning)
 		traceOpts = append(traceOpts, otlptracegrpc.WithInsecure())
 		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
 		logOpts = append(logOpts, otlploggrpc.WithInsecure())
+	} else {
+		creds, tc, err := agenttls.Resolve(ctx, tlsOpts, false, slog.Default())
+		if err != nil {
+			return nil, fmt.Errorf("exporter: mTLS credentials: %w", err)
+		}
+		tlsCreds = tc
+		tlsCreds.StartRotation(ctx)
+		traceOpts = append(traceOpts, otlptracegrpc.WithTLSCredentials(creds))
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithTLSCredentials(creds))
+		logOpts = append(logOpts, otlploggrpc.WithTLSCredentials(creds))
 	}
 
 	traceExp, err := otlptracegrpc.New(ctx, traceOpts...)
@@ -110,7 +126,7 @@ func New(ctx context.Context, endpoint string, insecure bool) (*Exporter, error)
 	)
 	global.SetLoggerProvider(lp)
 
-	return &Exporter{endpoint: endpoint, tp: tp, mp: mp, lp: lp}, nil
+	return &Exporter{endpoint: endpoint, tp: tp, mp: mp, lp: lp, tlsCreds: tlsCreds}, nil
 }
 
 // newResource builds the resource with the required attributes:
@@ -145,8 +161,11 @@ func newResource() (*resource.Resource, error) {
 	)
 }
 
-// Shutdown flushes and shuts down all providers.
+// Shutdown flushes and shuts down all providers, then releases mTLS credentials.
 func (e *Exporter) Shutdown(ctx context.Context) error {
+	if e.tlsCreds != nil {
+		_ = e.tlsCreds.Close()
+	}
 	var firstErr error
 	if err := e.tp.Shutdown(ctx); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("exporter: trace provider shutdown: %w", err)

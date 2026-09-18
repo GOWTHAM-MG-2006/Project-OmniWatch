@@ -1,0 +1,41 @@
+# OmniWatch — industry-ready (IND-1)
+# Component: spire-agent RBAC (k8s WorkloadAttestor needs pod/node reads)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-agent
+  namespace: omniwatch
+  labels:
+    app: spire-agent
+    tier: backend
+    phase: "industry"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spire-agent
+  labels:
+    app: spire-agent
+    tier: backend
+    phase: "industry"
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spire-agent
+  labels:
+    app: spire-agent
+    tier: backend
+    phase: "industry"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spire-agent
+subjects:
+- kind: ServiceAccount
+  name: spire-agent
+  namespace: omniwatch

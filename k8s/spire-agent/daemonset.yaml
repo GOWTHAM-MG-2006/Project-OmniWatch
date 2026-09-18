@@ -1,0 +1,69 @@
+# OmniWatch — industry-ready (IND-1)
+# Component: spire-agent DaemonSet (workload attestation for agent mTLS)
+# Plan checkbox: - [ ] 1. TLS/mTLS module (SPIRE + mTLS for OTLP)
+# Conventions follow k8s/omniwatch-agent (labels app/tier/phase, namespace omniwatch).
+# hostPID + hostPath socket are required for workload attestation; the agent
+# reaches the Workload API at unix:///tmp/spire-agent/public/api.sock
+# (matches configs/agent.yaml tls.spiffe_socket_path).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: omniwatch
+  labels:
+    app: spire-agent
+    tier: backend
+    phase: "industry"
+spec:
+  selector:
+    matchLabels:
+      app: spire-agent
+  template:
+    metadata:
+      labels:
+        app: spire-agent
+        tier: backend
+        phase: "industry"
+    spec:
+      serviceAccountName: spire-agent
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: spire-agent
+        image: ghcr.io/spiffe/spire-agent:1.9.5
+        args:
+        - -config
+        - /run/spire/config/agent.conf
+        volumeMounts:
+        - name: spire-config
+          mountPath: /run/spire/config
+          readOnly: true
+        - name: spire-socket
+          mountPath: /tmp/spire-agent/public
+          mountPropagation: HostToContainer
+        livenessProbe:
+          exec:
+            command: ["/opt/spire/bin/spire-agent", "healthcheck"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: spire-config
+        configMap:
+          name: spire-agent-config
+      # Socket dir uses the SPIRE default (/tmp/spire-agent/public/api.sock).
+      # omniwatch-agent pods mount this SAME hostPath at /tmp/spire-agent/public
+      # so tls.spiffe_socket_path works verbatim (see README).
+      - name: spire-socket
+        hostPath:
+          path: /tmp/spire-agent/public
+          type: DirectoryOrCreate

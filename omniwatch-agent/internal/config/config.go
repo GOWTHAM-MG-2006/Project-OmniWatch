@@ -68,6 +68,11 @@ type Config struct {
 			Insecure bool   `yaml:"insecure"`
 		} `yaml:"otlp"`
 	} `yaml:"exporter"`
+	TLS struct {
+		CertRotationInterval time.Duration `yaml:"cert_rotation_interval"`
+		SpiffeSocketPath     string        `yaml:"spiffe_socket_path"`
+		TrustDomain          string        `yaml:"trust_domain"`
+	} `yaml:"tls"`
 }
 
 // Default returns a Config populated with default values.
@@ -100,6 +105,9 @@ func Default() *Config {
 	}
 	c.Exporter.OTLP.Endpoint = "otel-collector:4317"
 	c.Exporter.OTLP.Insecure = true
+	c.TLS.CertRotationInterval = 24 * time.Hour
+	c.TLS.SpiffeSocketPath = "unix:///tmp/spire-agent/public/api.sock"
+	c.TLS.TrustDomain = "example.org"
 	return c
 }
 
@@ -170,6 +178,17 @@ func applyEnvOverrides(c *Config) {
 		if b, err := strconv.ParseBool(v); err == nil {
 			c.Exporter.OTLP.Insecure = b
 		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_CERT_ROTATION_INTERVAL"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.TLS.CertRotationInterval = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_SPIFFE_SOCKET_PATH"); ok {
+		c.TLS.SpiffeSocketPath = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_TRUST_DOMAIN"); ok {
+		c.TLS.TrustDomain = v
 	}
 }
 
