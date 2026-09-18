@@ -8,3 +8,17 @@ openTelemetry:
     otlp:
       endpoint: otelcol:4317
       insecure: true
+log_level: INFO
+kernel_version_min: "5.10"
+discovery:
+  instrument:
+    - k8s_namespace: "*"
+    - exe_path: "*"
+    - open_ports: 80,443,8000-8999
+  exclude_instrument:
+    - k8s_namespace: kube-system
+ebpf:
+  wakeup_len: 100
+otel_traces_export:
+  endpoint: http://otelcol:4317
+  protocol: grpc

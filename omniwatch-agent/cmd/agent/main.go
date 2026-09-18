@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/omniwatch/omniwatch-agent/internal/beyla"
 	"github.com/omniwatch/omniwatch-agent/internal/collector"
 	"github.com/omniwatch/omniwatch-agent/internal/config"
 	"github.com/omniwatch/omniwatch-agent/internal/exporter"
@@ -55,6 +56,11 @@ func run() int {
 		"config_path", configPath,
 		"log_level", cfg.Agent.LogLevel,
 		"collection_interval", cfg.Agent.CollectionInterval.String())
+
+	// Beyla/eBPF preflight (IND-6): advisory kernel + eBPF availability gate.
+	// Non-fatal by design: an unsupported host only degrades Beyla traces,
+	// the agent still runs its receivers.
+	beyla.LogCheck(logger)
 
 	// OTel SDK initialization (T4): trace, meter and logger providers
 	// exporting via OTLP gRPC to the endpoint from config.

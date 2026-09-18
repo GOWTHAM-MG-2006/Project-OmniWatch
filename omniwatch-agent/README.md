@@ -450,7 +450,23 @@ openTelemetry:
     otlp:
       endpoint: otelcol:4317
       insecure: true
+log_level: INFO
+kernel_version_min: "5.10"
+discovery:
+  instrument:
+    - k8s_namespace: "*"
+    - exe_path: "*"
+    - open_ports: 80,443,8000-8999
+  exclude_instrument:
+    - k8s_namespace: kube-system
+ebpf:
+  wakeup_len: 100
+otel_traces_export:
+  endpoint: http://otelcol:4317
+  protocol: grpc
 ```
+
+> **Schema note**: the `openTelemetry` block above is the legacy 1.x schema, kept for reference. The running Beyla image (v3.x) reads `otel_traces_export` — the endpoint needs an explicit scheme (`http://otelcol:4317` + `protocol: grpc` = plaintext gRPC, matching the old `insecure: true`); a bare `otelcol:4317` fails with `URL must have a scheme and a host`. If the `otel_traces_export` section is removed, Beyla fails with `you need to define at least one exporter`.
 
 ### K8s sidecar container
 
@@ -490,9 +506,29 @@ Beyla requires eBPF support. It will not function in:
 - Container runables that block `CAP_BPF` or `CAP_SYS_ADMIN`.
 - Windows nodes.
 
-### Known limitation
+### Discovery modes
 
-Beyla logs a `discovery-config` error with the minimal plan config block. This is a known issue (tracked as F3 probe) — production tuning of the Beyla config is planned for a future phase.
+The `discovery.instrument` entries are OR'd — a process matching **any** entry is instrumented:
+
+| Entry | Mode | Where it works |
+|-------|------|----------------|
+| `k8s_namespace: "*"` | Kubernetes | K8s DaemonSet — discovers all pods except excluded namespaces |
+| `exe_path: "*"` | Executable path glob | Any host — matches processes by binary path |
+| `open_ports: 80,443,8000-8999` | Open port match | Any host — instruments processes listening on those ports |
+
+`discovery.exclude_instrument` skips `kube-system` (stacked on top of Beyla's built-in default exclusions for itself, Alloy, and otelcol). The `ebpf.wakeup_len` tunes eBPF ring-buffer wakeups (lower = lower latency, higher = less overhead).
+
+### Kernel requirements
+
+Beyla needs Linux kernel **>= 5.10** with eBPF enabled (`CONFIG_BPF`/`CONFIG_BPF_SYSCALL`) and a mounted bpffs (`mount -t bpf bpffs /sys/fs/bpf`). The agent runs an advisory preflight at boot (`internal/beyla`) that logs either `beyla preflight: eBPF supported` or a `Warn` with the exact remediation — this check is **non-fatal**: an unsupported host only degrades Beyla traces, the agent's receivers still run. It will not function on Windows nodes or kernels with `CONFIG_BPF=n`.
+
+### Privileged justification
+
+The Beyla container runs with `privileged: true` (K8s) / `cap_add: [SYS_ADMIN]` (Compose) because attaching eBPF probes requires `CAP_BPF`/`CAP_SYS_ADMIN` plus access to the host pid namespace and bpffs. This is scoped to the Beyla sidecar **only** — the agent container stays non-root (`65532`), read-only root filesystem, no `hostNetwork`/`hostPID`. (K8s manifest detail lives in `k8s/omniwatch-agent/daemonset.yaml`.)
+
+### Resolved: discovery-config error
+
+The old minimal config (no `discovery` section) made Beyla log `wrong Beyla configuration: missing application discovery section or network metrics configuration`. The production `discovery.instrument` section above eliminates exactly this error — Beyla now logs its discovery modes at startup instead.
 
 ---
 
