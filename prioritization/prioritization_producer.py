@@ -48,8 +48,9 @@ class PrioritizationProducer:
 
     @property
     def topic(self) -> str:
-        """Return the produced topic name."""
-        return TOPIC_INCIDENTS_CREATED
+        """Return the produced topic name (settings registry wins)."""
+        return getattr(
+            self._settings, "kafka_topic_created", None) or TOPIC_INCIDENTS_CREATED
 
     def start(self) -> None:
         """Initialize the Kafka producer."""
@@ -61,7 +62,7 @@ class PrioritizationProducer:
         _LOG.info(
             "prioritization producer started: client=%s topic=%s",
             self._client_id,
-            TOPIC_INCIDENTS_CREATED,
+            self.topic,
         )
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -104,14 +105,14 @@ class PrioritizationProducer:
             base_delay=0.5,
             max_delay=4.0,
             logger=_LOG,
-            topic=TOPIC_INCIDENTS_CREATED,
+            topic=self.topic,
             value=payload,
             key=msg_key,
         )
         _LOG.debug(
             "published incident: id=%s topic=%s key=%s severity=%s",
             incident.incident_id,
-            TOPIC_INCIDENTS_CREATED,
+            self.topic,
             msg_key,
             incident.severity,
         )

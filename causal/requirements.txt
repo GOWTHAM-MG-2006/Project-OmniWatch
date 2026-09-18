@@ -6,6 +6,10 @@
 #          which ships no cp314 wheels). javabridge is deliberately EXCLUDED:
 #          PC / RandomWalk / BayesianNetwork do not import it.
 #          pingouin is optional (only for use_partial_corr=True) — excluded.
+# SKLEARN SPLIT (DYN-python): this image keeps numpy==1.23.5 +
+# scikit-learn<1.2 for PyRCA on py3.10. The predictive image uses
+# numpy>=1.26 + scikit-learn>=1.5 on py3.14. Never install both
+# requirement sets in one venv/image — numpy/sklearn ABIs conflict.
 
 # --- PyRCA (Salesforce root cause analysis library) -------------------------
 sfr-pyrca==1.0.1              # NEVER `pip install pyrca` (squatted PyPI name)

@@ -28,18 +28,40 @@ from predictive.config.settings import Settings
 from predictive.drift import ADWINDriftDetector, CUSUMDetector
 
 
-# ─── Constants ────────────────────────────────────────────────────────────── #
+# ─── Constants (all env-overridable; defaults preserve today's behavior) ─── #
 
-_COLD_START_MIN_SAMPLES = 100
-_DEFAULT_ZSCORE_THRESHOLD = 3.0
-_SEASONAL_DEFAULT_PERIOD = 24
+
+def _env_float(primary: str, fallback: str, default: float) -> float:
+    return float(os.getenv(primary, os.getenv(fallback, str(default))))
+
+
+def _env_int(primary: str, fallback: str, default: int) -> int:
+    return int(os.getenv(primary, os.getenv(fallback, str(default))))
+
+
+_COLD_START_MIN_SAMPLES = _env_int(
+    "OMNIWATCH_COLD_START_MIN_SAMPLES", "COLD_START_MIN_SAMPLES", 100)
+_DEFAULT_ZSCORE_THRESHOLD = _env_float(
+    "OMNIWATCH_PREDICTIVE_ZSCORE_THRESHOLD",
+    "PREDICTIVE_ZSCORE_THRESHOLD", 3.0)
+_SEASONAL_DEFAULT_PERIOD = _env_int(
+    "OMNIWATCH_PREDICTIVE_SEASONALITY_PERIOD",
+    "PREDICTIVE_SEASONALITY_PERIOD", 24)
 
 # T8 — drift detection & retrain loop
-_CUSUM_DRIFT_THRESHOLD = 4.0
-_CUSUM_SLACK = 0.5
-_ADWIN_DELTA = 0.002
-_ADWIN_MIN_WINDOW = 30
-_ADWIN_MAX_BUCKETS = 5
+_CUSUM_DRIFT_THRESHOLD = _env_float(
+    "OMNIWATCH_PREDICTIVE_CUSUM_DRIFT_THRESHOLD",
+    "PREDICTIVE_CUSUM_DRIFT_THRESHOLD", 4.0)
+_CUSUM_SLACK = _env_float(
+    "OMNIWATCH_PREDICTIVE_CUSUM_SLACK", "PREDICTIVE_CUSUM_SLACK", 0.5)
+_ADWIN_DELTA = _env_float(
+    "OMNIWATCH_PREDICTIVE_ADWIN_DELTA", "PREDICTIVE_ADWIN_DELTA", 0.002)
+_ADWIN_MIN_WINDOW = _env_int(
+    "OMNIWATCH_PREDICTIVE_ADWIN_MIN_WINDOW",
+    "PREDICTIVE_ADWIN_MIN_WINDOW", 30)
+_ADWIN_MAX_BUCKETS = _env_int(
+    "OMNIWATCH_PREDICTIVE_ADWIN_MAX_BUCKETS",
+    "PREDICTIVE_ADWIN_MAX_BUCKETS", 5)
 # ADWIN input scaling: the Hoeffding bound at delta=0.002 is ~2.4 for a
 # single-point cut (n1=1), so a lone ~2.6σ outlier would falsely fire.  Feeding
 # the z-score scaled by 0.5 keeps normal σ~1 noise (and single outliers up to

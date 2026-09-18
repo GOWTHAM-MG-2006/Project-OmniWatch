@@ -28,7 +28,17 @@ from orchestration.action_library import build_idempotency_key
 logger = logging.getLogger(__name__)
 
 # Default simulation endpoint — mock backend, no real remediation
-_SIMULATION_ENDPOINT: str = "http://localhost:8010/api/v1/simulate-action"
+def _default_simulation_endpoint() -> str:
+    # Cluster-DNS-aware default (orchestration service); localhost override
+    # for local dev via OMNIWATCH_SIMULATION_ENDPOINT / SIMULATION_ENDPOINT.
+    return os.getenv(
+        "OMNIWATCH_SIMULATION_ENDPOINT",
+        os.getenv(
+            "SIMULATION_ENDPOINT",
+            "http://orchestration:8010/api/v1/simulate-action"))
+
+
+_SIMULATION_ENDPOINT: str = _default_simulation_endpoint()
 
 # DRY_RUN output format — must match plan spec exactly
 _DRY_RUN_TEMPLATE: str = "dry-run: would execute {action_type} on {entity_id}"

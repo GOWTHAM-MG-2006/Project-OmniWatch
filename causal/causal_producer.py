@@ -15,7 +15,16 @@ from typing import Any
 from causal.config.settings import Settings
 from storage.common import StorageError, create_logger
 
-TOPIC_INCIDENTS_CAUSAL = "omniwatch.incidents.causal"
+
+def _topic_env(primary: str, fallback: str, default: str) -> str:
+    import os as _os
+
+    return _os.getenv(primary, _os.getenv(fallback, default))
+
+
+TOPIC_INCIDENTS_CAUSAL = _topic_env(
+    "OMNIWATCH_KAFKA_TOPICS_CAUSAL", "KAFKA_TOPIC_CAUSAL",
+    "omniwatch.incidents.causal")
 
 _LOG = create_logger("omniwatch.causal.causal_producer")
 _LOG.setLevel(logging.INFO)
@@ -50,7 +59,9 @@ class CausalProducer:
         if not isinstance(incident, dict) or not incident:
             _LOG.warning("skipping invalid incident payload: %r", type(incident).__name__)
             return None
-        return self._producer.send(TOPIC_INCIDENTS_CAUSAL, value=incident)
+        topic = getattr(
+            self._settings, "kafka_topic_causal", None) or TOPIC_INCIDENTS_CAUSAL
+        return self._producer.send(topic, value=incident)
 
     def close(self) -> None:
         """Flush and release the producer; idempotent and best-effort."""

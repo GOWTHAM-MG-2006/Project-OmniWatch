@@ -44,31 +44,74 @@ except ImportError:  # Local dev: uvicorn main:app from dashboard/api/
 _LOG: logging.Logger = logging.getLogger("omniwatch.dashboard")
 
 # ---------------------------------------------------------------------------
-# Config (all from env, never hardcoded)
+# Config (all from env, never hardcoded; OMNIWATCH_* primary, old bare
+# names deprecated fallback — today's defaults preserved)
 # ---------------------------------------------------------------------------
 
-CLICKHOUSE_HOST: str = os.getenv("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT: int = int(os.getenv("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DB: str = os.getenv("CLICKHOUSE_DB", "omniwatch")
-CLICKHOUSE_USER: str = os.getenv("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD: str = os.getenv("CLICKHOUSE_PASSWORD", "")
+def _cfg(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
 
-NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "omniwatch")
 
-MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9010")
-MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() in ("1", "true", "yes", "on")
+def _cfg_int(primary: str, fallback: str, default: int) -> int:
+    return int(_cfg(primary, fallback, str(default)))
 
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:8b")
-LEARNING_SERVICE_URL: str = os.getenv("LEARNING_SERVICE_URL", "http://learning:8030")
-GENAI_SERVICE_URL: str = os.getenv("GENAI_SERVICE_URL", "http://genai:8020")
-ORCHESTRATION_SERVICE_URL: str = os.getenv("ORCHESTRATION_SERVICE_URL", "http://orchestration:8010")
 
-DASHBOARD_PORT: int = int(os.getenv("DASHBOARD_PORT", "8011"))
+CLICKHOUSE_HOST: str = _cfg(
+    "OMNIWATCH_CLICKHOUSE_HOST", "CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT: int = _cfg_int(
+    "OMNIWATCH_CLICKHOUSE_HTTP_PORT", "CLICKHOUSE_PORT", 8123)
+CLICKHOUSE_DB: str = _cfg(
+    "OMNIWATCH_CLICKHOUSE_DB", "CLICKHOUSE_DB", "omniwatch")
+CLICKHOUSE_USER: str = _cfg(
+    "OMNIWATCH_CLICKHOUSE_USER", "CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD: str = _cfg(
+    "OMNIWATCH_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD", "")
+
+NEO4J_URI: str = _cfg(
+    "OMNIWATCH_NEO4J_URI", "NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER: str = _cfg(
+    "OMNIWATCH_NEO4J_USER", "NEO4J_USER", "neo4j")
+NEO4J_PASSWORD: str = _cfg(
+    "OMNIWATCH_NEO4J_PASSWORD", "NEO4J_PASSWORD", "omniwatch")
+
+MINIO_ENDPOINT: str = _cfg(
+    "OMNIWATCH_MINIO_ENDPOINT", "MINIO_ENDPOINT", "localhost:9010")
+MINIO_ACCESS_KEY: str = _cfg(
+    "OMNIWATCH_MINIO_ACCESS_KEY", "MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY: str = _cfg(
+    "OMNIWATCH_MINIO_SECRET_KEY", "MINIO_SECRET_KEY", "minioadmin")
+MINIO_SECURE: bool = _cfg(
+    "OMNIWATCH_MINIO_SECURE", "MINIO_SECURE", "false").lower() in (
+    "1", "true", "yes", "on")
+
+OLLAMA_URL: str = _cfg(
+    "OMNIWATCH_LLM_URL", "OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL: str = _cfg(
+    "OMNIWATCH_LLM_MODEL", "OLLAMA_MODEL", "qwen3:8b")
+LEARNING_SERVICE_URL: str = _cfg(
+    "OMNIWATCH_LEARNING_URL", "LEARNING_SERVICE_URL", "http://learning:8030")
+GENAI_SERVICE_URL: str = _cfg(
+    "OMNIWATCH_GENAI_URL", "GENAI_SERVICE_URL", "http://genai:8020")
+ORCHESTRATION_SERVICE_URL: str = _cfg(
+    "OMNIWATCH_ORCHESTRATION_URL", "ORCHESTRATION_SERVICE_URL",
+    "http://orchestration:8010")
+
+DASHBOARD_PORT: int = _cfg_int(
+    "OMNIWATCH_DASHBOARD_PORT", "DASHBOARD_PORT", 8011)
+
+# MinIO bucket registry (env-overridable; today's names preserved)
+MINIO_BUCKET_AUDIT: str = _cfg(
+    "OMNIWATCH_MINIO_BUCKETS_AUDIT", "MINIO_BUCKET_AUDIT",
+    "omniwatch-audit-logs")
+MINIO_BUCKET_INCIDENTS: str = _cfg(
+    "OMNIWATCH_MINIO_BUCKETS_INCIDENTS", "MINIO_BUCKET_INCIDENTS",
+    "omniwatch-incidents")
+MINIO_BUCKET_RUNBOOKS: str = _cfg(
+    "OMNIWATCH_MINIO_BUCKETS_RUNBOOKS", "MINIO_BUCKET_RUNBOOKS",
+    "omniwatch-runbooks")
+MINIO_BUCKET_DASHBOARDS: str = _cfg(
+    "OMNIWATCH_MINIO_BUCKETS_DASHBOARDS", "MINIO_BUCKET_DASHBOARDS",
+    "omniwatch-dashboards")
 
 # ---------------------------------------------------------------------------
 # Model Manager (LLM provider abstraction — singleton)
@@ -670,13 +713,13 @@ def create_app() -> FastAPI:
     @app.get("/api/audit-logs")
     async def api_audit_logs(prefix: str = Query("")) -> dict:
         """List audit log objects from MinIO omniwatch-audit-logs bucket."""
-        files = _safe_minio_list("omniwatch-audit-logs", prefix=prefix)
+        files = _safe_minio_list(MINIO_BUCKET_AUDIT, prefix=prefix)
         return {"audit_logs": files, "count": len(files), "timestamp": _now_iso()}
 
     @app.get("/api/audit-logs/{object_name}", response_model=None)
     async def api_audit_log_detail(object_name: str):
         """Download a specific audit log from MinIO."""
-        data = _safe_minio_get("omniwatch-audit-logs", object_name)
+        data = _safe_minio_get(MINIO_BUCKET_AUDIT, object_name)
         if data is None:
             return JSONResponse(status_code=404, content={"error": "audit log not found", "object_name": object_name})
         try:
@@ -986,7 +1029,7 @@ def create_app() -> FastAPI:
     @app.get("/api/incident-archive")
     async def api_incident_archive(prefix: str = Query("")) -> dict:
         """List archived incident objects from MinIO omniwatch-incidents bucket."""
-        files = _safe_minio_list("omniwatch-incidents", prefix=prefix)
+        files = _safe_minio_list(MINIO_BUCKET_INCIDENTS, prefix=prefix)
         return {"incidents": files, "count": len(files), "timestamp": _now_iso()}
 
     # ----- compliance reports (MinIO) -----
@@ -994,7 +1037,7 @@ def create_app() -> FastAPI:
     @app.get("/api/compliance-reports")
     async def api_compliance_reports(prefix: str = Query("")) -> dict:
         """List compliance reports from MinIO omniwatch-audit-logs bucket."""
-        files = _safe_minio_list("omniwatch-audit-logs", prefix="compliance/")
+        files = _safe_minio_list(MINIO_BUCKET_AUDIT, prefix="compliance/")
         return {"reports": files, "count": len(files), "timestamp": _now_iso()}
 
     # ----- recommendations (proxy to learning service) -----
@@ -1047,7 +1090,7 @@ def create_app() -> FastAPI:
 
         new_settings = ModelSettings(
             provider=provider,
-            model_name=body.get("model_name", "qwen3:8b"),
+            model_name=body.get("model_name", OLLAMA_MODEL),
             api_key=incoming_api_key,
             base_url=body.get("base_url", ""),
             temperature=float(body.get("temperature", 0.7)),
@@ -1324,7 +1367,7 @@ def create_app() -> FastAPI:
 
         try:
             client = _get_minio_client()
-            minio_ok = client.bucket_exists("omniwatch-audit-logs")
+            minio_ok = client.bucket_exists(MINIO_BUCKET_AUDIT)
         except Exception as exc:  # noqa: BLE001
             _LOG.debug("MinIO health check failed: %s", exc)
 
@@ -1505,7 +1548,7 @@ def create_app() -> FastAPI:
     @app.get("/api/minio/runbooks/{runbook_id}", response_model=None)
     async def api_minio_runbook(runbook_id: str):
         """Fetch a runbook from MinIO omniwatch-runbooks bucket."""
-        data = _safe_minio_get("omniwatch-runbooks", runbook_id)
+        data = _safe_minio_get(MINIO_BUCKET_RUNBOOKS, runbook_id)
         if data is None:
             return JSONResponse(status_code=404, content={"error": "runbook not found", "runbook_id": runbook_id})
         try:
@@ -1617,7 +1660,7 @@ def create_app() -> FastAPI:
         for tbl in ["incidents", "anomalies", "knowledge_base"]:
             rows = _safe_ch_query(f"SELECT count() as cnt FROM omniwatch.{tbl}")
             all_stats[tbl] = rows[0].get("cnt", 0) if rows else 0
-        runbooks = _safe_minio_list("omniwatch-runbooks", prefix="")
+        runbooks = _safe_minio_list(MINIO_BUCKET_RUNBOOKS, prefix="")
         recent = _safe_ch_query("SELECT * FROM omniwatch.incidents ORDER BY created_at DESC LIMIT 5")
         content = _render_live_summary_markdown(all_stats, recent, runbooks)
         # Optionally enhance with Ollama using live stats
@@ -1702,10 +1745,10 @@ def create_app() -> FastAPI:
             iid = target_incident.get("incident_id", "")
             # Search common prefixes
             for prefix in [f"genai/{iid}/runbook", f"reports/{iid}", ""]:
-                objs = _safe_minio_list("omniwatch-runbooks", prefix=prefix)
+                objs = _safe_minio_list(MINIO_BUCKET_RUNBOOKS, prefix=prefix)
                 if objs:
                     # Try to fetch the newest object
-                    data = _safe_minio_get("omniwatch-runbooks", objs[-1])
+                    data = _safe_minio_get(MINIO_BUCKET_RUNBOOKS, objs[-1])
                     if data:
                         try:
                             j = json.loads(data)
@@ -1785,11 +1828,11 @@ def create_app() -> FastAPI:
             iid = target_incident.get("incident_id", "")
             # Check MinIO for existing postmortem artifacts
             for prefix in [f"genai/{iid}/postmortem", f"reports/{iid}", ""]:
-                objs = _safe_minio_list("omniwatch-runbooks", prefix=prefix)
+                objs = _safe_minio_list(MINIO_BUCKET_RUNBOOKS, prefix=prefix)
                 # Filter to likely postmortem keys
                 pm_objs = [o for o in objs if "postmortem" in o.lower() or "post-mortem" in o.lower()]
                 if pm_objs:
-                    data = _safe_minio_get("omniwatch-runbooks", pm_objs[-1])
+                    data = _safe_minio_get(MINIO_BUCKET_RUNBOOKS, pm_objs[-1])
                     if data:
                         try:
                             j = json.loads(data)
@@ -1950,7 +1993,7 @@ def create_app() -> FastAPI:
     @app.get("/api/dashboard/{dashboard_id}", response_model=None)
     async def api_dashboard_load(dashboard_id: str):
         """Load a saved dashboard JSON from MinIO omniwatch-dashboards bucket."""
-        data = _safe_minio_get("omniwatch-dashboards", dashboard_id)
+        data = _safe_minio_get(MINIO_BUCKET_DASHBOARDS, dashboard_id)
         if data is None:
             return JSONResponse(status_code=404, content={"error": "dashboard not found", "dashboard_id": dashboard_id})
         try:
@@ -2022,7 +2065,7 @@ def create_app() -> FastAPI:
     async def api_dashboard_save(dashboard_id: str, body: dict[str, Any]):
         """Save a dashboard JSON to MinIO omniwatch-dashboards bucket."""
         payload = json.dumps(body, default=str).encode("utf-8")
-        ok = _safe_minio_put("omniwatch-dashboards", dashboard_id, payload, content_type="application/json")
+        ok = _safe_minio_put(MINIO_BUCKET_DASHBOARDS, dashboard_id, payload, content_type="application/json")
         if not ok:
             return JSONResponse(status_code=500, content={"error": "failed to save dashboard", "dashboard_id": dashboard_id})
         return {"dashboard_id": dashboard_id, "saved": True, "timestamp": _now_iso()}

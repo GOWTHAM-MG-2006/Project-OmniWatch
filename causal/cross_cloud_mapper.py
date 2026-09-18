@@ -24,9 +24,21 @@ from storage.common import create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.causal.cross_cloud_mapper")
 
-_DEFAULT_RULES_PATH = Path(__file__).resolve().parent / "config" / "causal_rules.yaml"
-_DEFAULT_PROVIDER = "gcp"
-_DEFAULT_TEMPLATE = "{provider}:{region}:{entity_type}:{name}"
+def _env_default(name: str, fallback: str, default: str) -> str:
+    import os as _os
+
+    return _os.getenv(name, _os.getenv(fallback, default))
+
+
+_DEFAULT_RULES_PATH = Path(_env_default(
+    "OMNIWATCH_CAUSAL_RULES_PATH", "CAUSAL_RULES_PATH", str(
+        Path(__file__).resolve().parent / "config" / "causal_rules.yaml")))
+# Never "gcp" by default — unknown until resolved via entity attributes/YAML/env
+_DEFAULT_PROVIDER = _env_default(
+    "OMNIWATCH_DEFAULT_CLOUD_PROVIDER", "DEFAULT_CLOUD_PROVIDER", "unknown")
+_DEFAULT_TEMPLATE = _env_default(
+    "OMNIWATCH_CAUSAL_ID_TEMPLATE", "CAUSAL_ID_TEMPLATE",
+    "{provider}:{region}:{entity_type}:{name}")
 _UNKNOWN = "unknown"
 
 

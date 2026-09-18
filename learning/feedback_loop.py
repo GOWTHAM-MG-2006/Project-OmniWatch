@@ -25,17 +25,35 @@ from confluent_kafka import Consumer, KafkaError, KafkaException
 
 logger = logging.getLogger("omniwatch.learning.feedback_loop")
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-KAFKA_GROUP_ID = os.environ.get("KAFKA_LEARNING_GROUP_ID", "omniwatch-learning-group")
-KAFKA_AUTO_OFFSET_RESET = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
+def _L(primary: str, fallback: str, default: str) -> str:
+    """OMNIWATCH_* primary with old bare-name fallback (backwards compat)."""
+    return os.environ.get(primary, os.environ.get(fallback, default))
 
-CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "omniwatch")
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 
-REMEDIATION_TOPIC = "omniwatch.remediation.actions"
+KAFKA_BOOTSTRAP_SERVERS = _L(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS",
+    "localhost:9092")
+KAFKA_GROUP_ID = _L(
+    "OMNIWATCH_KAFKA_GROUP_LEARNING", "KAFKA_LEARNING_GROUP_ID",
+    "omniwatch-learning-group")
+KAFKA_AUTO_OFFSET_RESET = _L(
+    "OMNIWATCH_KAFKA_AUTO_OFFSET_RESET", "KAFKA_AUTO_OFFSET_RESET",
+    "earliest")
+
+CLICKHOUSE_HOST = _L(
+    "OMNIWATCH_CLICKHOUSE_HOST", "CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(_L(
+    "OMNIWATCH_CLICKHOUSE_HTTP_PORT", "CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_DB = _L(
+    "OMNIWATCH_CLICKHOUSE_DB", "CLICKHOUSE_DB", "omniwatch")
+CLICKHOUSE_USER = _L(
+    "OMNIWATCH_CLICKHOUSE_USER", "CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = _L(
+    "OMNIWATCH_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD", "")
+
+REMEDIATION_TOPIC = _L(
+    "OMNIWATCH_KAFKA_TOPICS_ACTIONS", "KAFKA_TOPIC_ACTIONS",
+    "omniwatch.remediation.actions")
 
 # Column list for knowledge_base insert (must match schema.sql + new columns).
 KB_COLUMNS = [
@@ -53,8 +71,8 @@ KB_COLUMNS = [
 
 # SQL to ensure new columns exist at runtime (idempotent).
 _ENSURE_COLUMNS_SQL = [
-    "ALTER TABLE omniwatch.knowledge_base ADD COLUMN IF NOT EXISTS action_type String DEFAULT ''",
-    "ALTER TABLE omniwatch.knowledge_base ADD COLUMN IF NOT EXISTS success_count UInt32 DEFAULT 0",
+    f"ALTER TABLE {CLICKHOUSE_DB}.knowledge_base ADD COLUMN IF NOT EXISTS action_type String DEFAULT ''",
+    f"ALTER TABLE {CLICKHOUSE_DB}.knowledge_base ADD COLUMN IF NOT EXISTS success_count UInt32 DEFAULT 0",
 ]
 
 
@@ -144,7 +162,9 @@ class FeedbackLoopProcessor:
         try:
             client = self._get_ch_client()
             data = [self._normalize_kb_row(kb_row)]
-            client.insert("omniwatch.knowledge_base", data, column_names=KB_COLUMNS)
+            client.insert(
+                f"{self._ch_db}.knowledge_base", data,
+                column_names=KB_COLUMNS)
             logger.info(
                 "inserted knowledge_base kb_id=%s incident_id=%s action_type=%s success=%s",
                 kb_row["kb_id"],

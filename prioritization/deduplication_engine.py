@@ -23,6 +23,15 @@ _LOG: logging.Logger = create_logger("omniwatch.prioritization.deduplication_eng
 
 # Dedup key template: root_cause_entity
 # TTL window: 300 seconds (5 minutes) — matches dedup_ttl_seconds from settings
+def _default_ttl() -> int:
+    import os as _os
+
+    return int(_os.getenv(
+        "OMNIWATCH_DEDUP_TTL_SECONDS",
+        _os.getenv("DEDUP_TTL_SECONDS", "300")))
+
+
+_DEFAULT_TTL_SECONDS = _default_ttl()
 
 
 class DeduplicationEngine:
@@ -43,7 +52,13 @@ class DeduplicationEngine:
             unchanged (deduplicated_count = 1, status = "OPEN").
     """
 
-    def __init__(self, ttl_seconds: int = 300, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        ttl_seconds: int | None = None,
+        enabled: bool = True,
+    ) -> None:
+        if ttl_seconds is None:
+            ttl_seconds = _DEFAULT_TTL_SECONDS
         self._ttl = ttl_seconds
         self._enabled = enabled
         self._cache: dict[str, tuple[float, IncidentRecord]] = {}

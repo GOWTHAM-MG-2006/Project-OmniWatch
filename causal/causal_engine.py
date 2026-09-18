@@ -315,6 +315,7 @@ def set_last_incident(root_cause_entity: str) -> None:
 # --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+    import os
     import time
 
     import uvicorn
@@ -362,11 +363,13 @@ if __name__ == "__main__":
         daemon=True,
     )
     _gate_thread.start()
+    _port = int(os.getenv(
+        "OMNIWATCH_CAUSAL_PORT", os.getenv("CAUSAL_API_PORT", "8008")))
     try:
         uvicorn.run(
             "causal.causal_engine:app",
             host="0.0.0.0",
-            port=8008,
+            port=_port,
             reload=False,
         )
     finally:

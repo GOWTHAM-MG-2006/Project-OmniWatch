@@ -33,22 +33,43 @@ logger = logging.getLogger("omniwatch.learning.service")
 # Environment-driven configuration
 # ---------------------------------------------------------------------------
 
-CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "omniwatch")
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+def _L(primary: str, fallback: str, default: str) -> str:
+    """OMNIWATCH_* primary with old bare-name fallback (backwards compat)."""
+    return os.environ.get(primary, os.environ.get(fallback, default))
 
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "omniwatch")
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-KAFKA_GROUP_ID = os.environ.get("KAFKA_LEARNING_GROUP_ID", "omniwatch-learning-group")
-KAFKA_AUTO_OFFSET_RESET = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
+CLICKHOUSE_HOST = _L(
+    "OMNIWATCH_CLICKHOUSE_HOST", "CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(_L(
+    "OMNIWATCH_CLICKHOUSE_HTTP_PORT", "CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_DB = _L(
+    "OMNIWATCH_CLICKHOUSE_DB", "CLICKHOUSE_DB", "omniwatch")
+CLICKHOUSE_USER = _L(
+    "OMNIWATCH_CLICKHOUSE_USER", "CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = _L(
+    "OMNIWATCH_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD", "")
 
-PATTERN_MINING_INTERVAL = int(os.environ.get("PATTERN_MINING_INTERVAL", "900"))
-LEARNING_API_PORT = int(os.environ.get("LEARNING_API_PORT", "8030"))
+NEO4J_URI = _L(
+    "OMNIWATCH_NEO4J_URI", "NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = _L(
+    "OMNIWATCH_NEO4J_USER", "NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = _L(
+    "OMNIWATCH_NEO4J_PASSWORD", "NEO4J_PASSWORD", "omniwatch")
+
+KAFKA_BOOTSTRAP_SERVERS = _L(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS",
+    "localhost:9092")
+KAFKA_GROUP_ID = _L(
+    "OMNIWATCH_KAFKA_GROUP_LEARNING", "KAFKA_LEARNING_GROUP_ID",
+    "omniwatch-learning-group")
+KAFKA_AUTO_OFFSET_RESET = _L(
+    "OMNIWATCH_KAFKA_AUTO_OFFSET_RESET", "KAFKA_AUTO_OFFSET_RESET",
+    "earliest")
+
+PATTERN_MINING_INTERVAL = int(_L(
+    "OMNIWATCH_PATTERN_MINING_INTERVAL", "PATTERN_MINING_INTERVAL", "900"))
+LEARNING_API_PORT = int(_L(
+    "OMNIWATCH_LEARNING_PORT", "LEARNING_API_PORT", "8030"))
 
 # ---------------------------------------------------------------------------
 # Module-level state — managed by lifespan

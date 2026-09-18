@@ -24,7 +24,17 @@ from storage.common import StorageError, create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.causal.py_rca_adapter")
 
-_DEFAULT_RULES_PATH: Path = Path(__file__).resolve().parent / "config" / "causal_rules.yaml"
+def _default_rules_path() -> Path:
+    import os as _os
+
+    return Path(_os.getenv(
+        "OMNIWATCH_CAUSAL_RULES_PATH",
+        _os.getenv("CAUSAL_RULES_PATH", str(
+            Path(__file__).resolve().parent / "config" / "causal_rules.yaml")))
+    )
+
+
+_DEFAULT_RULES_PATH: Path = _default_rules_path()
 
 _ROOT_PREFIX = "ROOT_"
 

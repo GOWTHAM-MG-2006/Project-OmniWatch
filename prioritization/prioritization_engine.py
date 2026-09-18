@@ -34,7 +34,9 @@ from storage.common import StorageError, create_logger
 _LOG: logging.Logger = create_logger("omniwatch.prioritization.prioritization_engine")
 
 # API port per phase8-build-plan.md
-API_PORT = int(os.environ.get("PRIORITIZATION_API_PORT", "8009"))
+API_PORT = int(os.environ.get(
+    "OMNIWATCH_PRIORITIZATION_PORT",
+    os.environ.get("PRIORITIZATION_API_PORT", "8009")))
 
 
 class HealthResponse(BaseModel):
@@ -169,8 +171,9 @@ class PrioritizationEngine:
                 cfg = StorageConfig.from_env()
                 client = ClickHouseClient(config=cfg)
                 try:
+                    db = getattr(cfg, "clickhouse_db", "omniwatch")
                     client.get_client().command(
-                        f"ALTER TABLE omniwatch.incidents UPDATE deduplicated_count = {deduped.deduplicated_count} WHERE incident_id = '{deduped.incident_id}'"
+                        f"ALTER TABLE {db}.incidents UPDATE deduplicated_count = {deduped.deduplicated_count} WHERE incident_id = '{deduped.incident_id}'"
                     )
                     _LOG.info(
                         "Updated deduplicated_count in ClickHouse for incident %s to %d",

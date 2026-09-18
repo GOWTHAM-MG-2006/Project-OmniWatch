@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -25,18 +26,28 @@ import urllib.request
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (env-overridable defaults; today's localhost defaults kept)
 # ---------------------------------------------------------------------------
+
+_SIM_HOST = os.getenv(
+    "OMNIWATCH_SIM_HOST", os.getenv("SIM_HOST", "localhost"))
+_API_GATEWAY_PORT = os.getenv(
+    "OMNIWATCH_SIM_API_GATEWAY_PORT", os.getenv("SIM_API_GATEWAY_PORT", "8000"))
+_USER_SERVICE_PORT = os.getenv(
+    "OMNIWATCH_SIM_USER_SERVICE_PORT", os.getenv("SIM_USER_SERVICE_PORT", "8001"))
+_ORDER_SERVICE_PORT = os.getenv(
+    "OMNIWATCH_SIM_ORDER_SERVICE_PORT",
+    os.getenv("SIM_ORDER_SERVICE_PORT", "8002"))
 
 # Default targets for each security scenario
 SECURITY_TARGETS: dict[str, list[dict[str, Any]]] = {
     "security_attack": [
-        {"host": "localhost:8001", "name": "user-service"},
-        {"host": "localhost:8000", "name": "api-gateway"},
+        {"host": f"{_SIM_HOST}:{_USER_SERVICE_PORT}", "name": "user-service"},
+        {"host": f"{_SIM_HOST}:{_API_GATEWAY_PORT}", "name": "api-gateway"},
     ],
     "config_drift": [
-        {"host": "localhost:8000", "name": "api-gateway"},
-        {"host": "localhost:8002", "name": "order-service"},
+        {"host": f"{_SIM_HOST}:{_API_GATEWAY_PORT}", "name": "api-gateway"},
+        {"host": f"{_SIM_HOST}:{_ORDER_SERVICE_PORT}", "name": "order-service"},
     ],
 }
 

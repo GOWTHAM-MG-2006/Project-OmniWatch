@@ -10,14 +10,19 @@ Outputs: AnomalySession dicts (active / resolved) for downstream duration tracki
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# ─── Constants ────────────────────────────────────────────────────────────── #
+# ─── Constants (env-overridable; defaults preserve today's behavior) ─────── #
 
-_DEFAULT_THRESHOLD = 0.5
-_DEFAULT_RESOLUTION_WINDOW = 3
+_DEFAULT_THRESHOLD = float(os.getenv(
+    "OMNIWATCH_PREDICTIVE_SESSION_THRESHOLD",
+    os.getenv("PREDICTIVE_SESSION_THRESHOLD", "0.5")))
+_DEFAULT_RESOLUTION_WINDOW = int(os.getenv(
+    "OMNIWATCH_PREDICTIVE_RESOLUTION_WINDOW",
+    os.getenv("PREDICTIVE_RESOLUTION_WINDOW", "3")))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────── #

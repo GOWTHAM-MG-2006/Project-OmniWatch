@@ -1,5 +1,5 @@
 """
-OmniWatch — Generative AI Layer
+OmniWatch â€” Generative AI Layer
 Component: Compliance Report Generator (GAP2)
 Phase: 10
 Purpose: Generates SOC2 / ISO27001 / HIPAA / PCI-DSS evidence packages from
@@ -25,7 +25,7 @@ from genai.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Report type constants — EXACT names per AGENTS.md GAP2 spec
+# Report type constants â€” EXACT names per AGENTS.md GAP2 spec
 REPORT_TYPE_INCIDENT_RESPONSE = "Incident Response Evidence"
 REPORT_TYPE_SECURITY_EVENT = "Security Event Summary"
 REPORT_TYPE_SLA_COMPLIANCE = "SLA Compliance Report"
@@ -36,7 +36,15 @@ REPORT_TYPES: list[str] = [
     REPORT_TYPE_SLA_COMPLIANCE,
 ]
 
-AUDIT_BUCKET = "omniwatch-audit-logs"
+def _audit_bucket_default() -> str:
+    import os as _os
+
+    return _os.getenv(
+        "OMNIWATCH_MINIO_BUCKETS_AUDIT",
+        _os.getenv("MINIO_AUDIT_BUCKET", "omniwatch-audit-logs"))
+
+
+AUDIT_BUCKET = _audit_bucket_default()
 
 
 class ComplianceReporter:
@@ -97,13 +105,13 @@ class ComplianceReporter:
             client = self._get_ch_client()
             client.command("SELECT 1")
             ch_ok = True
-        except Exception as exc:  # noqa: BLE001 — health-check fallback
+        except Exception as exc:  # noqa: BLE001 â€” health-check fallback
             logger.warning(json.dumps({"event": "clickhouse_health_fail", "error": str(exc)}))
 
         try:
             mclient = self._get_minio_client()
-            minio_ok = mclient.bucket_exists(AUDIT_BUCKET)
-        except Exception as exc:  # noqa: BLE001 — health-check fallback
+            minio_ok = mclient.bucket_exists(self._audit_bucket)
+        except Exception as exc:  # noqa: BLE001 â€” health-check fallback
             logger.warning(json.dumps({"event": "minio_health_fail", "error": str(exc)}))
 
         return {"clickhouse": ch_ok, "minio": minio_ok, "all_healthy": ch_ok and minio_ok}
@@ -119,11 +127,23 @@ class ComplianceReporter:
         "deduplicated_count"
     )
 
+    @property
+    def _db(self) -> str:
+        """ClickHouse database (settings registry wins)."""
+        return getattr(
+            self._settings, "clickhouse_db", None) or "omniwatch"
+
+    @property
+    def _audit_bucket(self) -> str:
+        """Audit bucket (settings registry wins)."""
+        return getattr(
+            self._settings, "minio_audit_bucket", None) or AUDIT_BUCKET
+
     def get_incident(self, incident_id: str) -> dict[str, Any] | None:
         """Fetch a single incident from ClickHouse by incident_id."""
         client = self._get_ch_client()
         result = client.query(
-            f"SELECT {self._INCIDENT_COLUMNS} FROM omniwatch.incidents "
+            f"SELECT {self._INCIDENT_COLUMNS} FROM {self._db}.incidents "
             "WHERE incident_id = %(id)s LIMIT 1",
             parameters={"id": incident_id},
         )
@@ -139,7 +159,7 @@ class ComplianceReporter:
         prefix = f"incident-{incident_id}/"
         logs: list[dict[str, str]] = []
         try:
-            objects = mclient.list_objects(AUDIT_BUCKET, prefix=prefix)
+            objects = mclient.list_objects(self._audit_bucket, prefix=prefix)
             for obj in objects:
                 if obj.object_name:
                     logs.append({
@@ -147,7 +167,7 @@ class ComplianceReporter:
                         "size": str(obj.size or 0),
                         "last_modified": obj.last_modified.isoformat() if obj.last_modified else "",
                     })
-        except Exception as exc:  # noqa: BLE001 — list fallback
+        except Exception as exc:  # noqa: BLE001 â€” list fallback
             logger.warning(json.dumps({"event": "minio_list_fail", "incident_id": incident_id, "error": str(exc)}))
         return logs
 
@@ -155,7 +175,7 @@ class ComplianceReporter:
         """Fetch recent incidents from ClickHouse."""
         client = self._get_ch_client()
         result = client.query(
-            f"SELECT {self._INCIDENT_COLUMNS} FROM omniwatch.incidents "
+            f"SELECT {self._INCIDENT_COLUMNS} FROM {self._db}.incidents "
             "ORDER BY created_at DESC LIMIT %(limit)s",
             parameters={"limit": limit},
         )
@@ -213,7 +233,7 @@ class ComplianceReporter:
         from io import BytesIO
 
         mclient.put_object(
-            AUDIT_BUCKET,
+            self._audit_bucket,
             object_key,
             data=BytesIO(md_bytes),
             length=len(md_bytes),
@@ -224,7 +244,7 @@ class ComplianceReporter:
             incident_id=incident_id,
             report_type=report_type,
             framework=self._report_type_to_framework(report_type),
-            bucket=AUDIT_BUCKET,
+            bucket=self._audit_bucket,
             object_key=object_key,
         )
 
@@ -287,7 +307,7 @@ class ComplianceReporter:
 
         if fault_path:
             for i, node in enumerate(fault_path):
-                arrow = " → " if i < len(fault_path) - 1 else ""
+                arrow = " â†’ " if i < len(fault_path) - 1 else ""
                 lines.append(f"`{node}`{arrow}")
         else:
             lines.append("_No fault path recorded._")
@@ -389,7 +409,7 @@ class ComplianceReporter:
                 "",
             ])
             for i, node in enumerate(fault_path):
-                arrow = " → " if i < len(fault_path) - 1 else ""
+                arrow = " â†’ " if i < len(fault_path) - 1 else ""
                 lines.append(f"`{node}`{arrow}")
             lines.append("")
 
@@ -453,9 +473,9 @@ class ComplianceReporter:
             "",
             "| Metric | Value | Status |",
             "|--------|-------|--------|",
-            f"| Business Impact Score | {impact_score} | {'⚠️' if isinstance(impact_score, (int, float)) and impact_score > 50 else '✅'} |",
-            f"| SLA Breach Risk | {sla_risk} | {'🔴' if sla_risk == 'HIGH' else '🟡' if sla_risk == 'MEDIUM' else '🟢'} |",
-            f"| Overall SLA Status | — | **{sla_status}** |",
+            f"| Business Impact Score | {impact_score} | {'âš ï¸' if isinstance(impact_score, (int, float)) and impact_score > 50 else 'âœ…'} |",
+            f"| SLA Breach Risk | {sla_risk} | {'ðŸ”´' if sla_risk == 'HIGH' else 'ðŸŸ¡' if sla_risk == 'MEDIUM' else 'ðŸŸ¢'} |",
+            f"| Overall SLA Status | â€” | **{sla_status}** |",
             "",
             "## 2. Incident Timeline",
             "",
@@ -550,7 +570,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        """Liveness probe — returns service health status."""
+        """Liveness probe â€” returns service health status."""
         return reporter.health_check()
 
     @app.get("/report-types")

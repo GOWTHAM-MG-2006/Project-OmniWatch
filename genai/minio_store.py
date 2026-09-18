@@ -22,18 +22,38 @@ from genai.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-_BUCKETS: dict[str, str] = {
-    "summary": "omniwatch-runbooks",
-    "runbook": "omniwatch-runbooks",
-    "report": "omniwatch-runbooks",
-    "postmortem": "omniwatch-runbooks",
-}
+
+def _bucket_env(primary: str, fallback: str, default: str) -> str:
+    import os as _os
+
+    return _os.getenv(primary, _os.getenv(fallback, default))
+
+
+def _buckets_from_settings(settings: Settings | None) -> dict[str, str]:
+    """Per-type bucket map; settings registry wins, env-mapped defaults stay."""
+    runbooks = getattr(
+        settings, "minio_runbooks_bucket", None) or _bucket_env(
+        "OMNIWATCH_MINIO_BUCKETS_RUNBOOKS", "MINIO_RUNBOOKS_BUCKET",
+        "omniwatch-runbooks")
+    return {
+        "summary": runbooks,
+        "runbook": runbooks,
+        "report": runbooks,
+        "postmortem": runbooks,
+    }
+
+
+_BUCKETS: dict[str, str] = _buckets_from_settings(None)
 
 # All three required buckets per AGENTS.md MinIO Buckets spec
+# (env-overridable; defaults preserve today's behavior)
 _REQUIRED_BUCKETS: frozenset[str] = frozenset({
-    "omniwatch-runbooks",
-    "omniwatch-audit-logs",
-    "omniwatch-incidents",
+    _bucket_env("OMNIWATCH_MINIO_BUCKETS_RUNBOOKS", "MINIO_RUNBOOKS_BUCKET",
+                "omniwatch-runbooks"),
+    _bucket_env("OMNIWATCH_MINIO_BUCKETS_AUDIT", "MINIO_AUDIT_BUCKET",
+                "omniwatch-audit-logs"),
+    _bucket_env("OMNIWATCH_MINIO_BUCKETS_INCIDENTS", "MINIO_INCIDENTS_BUCKET",
+                "omniwatch-incidents"),
 })
 
 
@@ -74,7 +94,10 @@ class MinioStore:
         Returns:
             The full ``bucket/key`` path of the stored object.
         """
-        bucket = _BUCKETS.get(artifact.artifact_type, "omniwatch-runbooks")
+        buckets = _buckets_from_settings(self._settings)
+        bucket = buckets.get(
+            artifact.artifact_type,
+            buckets.get("runbook", "omniwatch-runbooks"))
         key = self._key_for(artifact)
         data = artifact.model_dump_json(indent=2).encode("utf-8")
 

@@ -59,13 +59,14 @@ class PrioritizationConsumer:
 
     @property
     def topic(self) -> str:
-        """Return the consumed topic name."""
-        return TOPIC_INCIDENTS_CAUSAL
+        """Return the consumed topic name (settings registry wins)."""
+        return getattr(
+            self._settings, "kafka_topic_causal", None) or TOPIC_INCIDENTS_CAUSAL
 
     def start(self) -> None:
         """Start the Kafka consumer and begin polling in a background thread."""
         self._consumer = KafkaConsumer(
-            topics=[TOPIC_INCIDENTS_CAUSAL],
+            topics=[self.topic],
             group_id=self._group_id,
             bootstrap_servers=self._bootstrap_servers,
             auto_offset_reset=self._auto_offset_reset,
@@ -82,7 +83,7 @@ class PrioritizationConsumer:
         _LOG.info(
             "prioritization consumer started: group=%s topic=%s",
             self._group_id,
-            TOPIC_INCIDENTS_CAUSAL,
+            self.topic,
         )
 
     def stop(self, timeout: float = 5.0) -> None:

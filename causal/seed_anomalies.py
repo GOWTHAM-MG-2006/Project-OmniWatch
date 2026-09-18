@@ -8,12 +8,17 @@ Inputs: none
 Outputs: omniwatch.anomalies.detected (Kafka)
 """
 import json
+import os
 from datetime import datetime, timezone
 
 from kafka import KafkaProducer
 
-TOPIC = "omniwatch.anomalies.detected"
-BOOTSTRAP = "kafka:29092"
+TOPIC = os.getenv(
+    "OMNIWATCH_KAFKA_TOPICS_ANOMALIES",
+    os.getenv("KAFKA_TOPIC_ANOMALIES", "omniwatch.anomalies.detected"))
+BOOTSTRAP = os.getenv(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS",
+    os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"))
 
 
 def build_signal(entity_id: str, metric: str, score: float) -> dict:

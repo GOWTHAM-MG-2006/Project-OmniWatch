@@ -16,6 +16,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
 
+def _sim_env(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+# In-cluster kafka bootstrap for docker-exec probes (env-overridable)
+_KAFKA_BOOTSTRAP = _sim_env(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS",
+    "kafka:29092")
+# Simulation target host/ports (env-overridable; localhost defaults kept)
+_SIM_HOST = _sim_env("OMNIWATCH_SIM_HOST", "SIM_HOST", "localhost")
+_SIM_PORTS = (
+    _sim_env("OMNIWATCH_SIM_API_GATEWAY_PORT", "SIM_API_GATEWAY_PORT", "8000"),
+    _sim_env("OMNIWATCH_SIM_USER_SERVICE_PORT", "SIM_USER_SERVICE_PORT", "8001"),
+    _sim_env("OMNIWATCH_SIM_ORDER_SERVICE_PORT", "SIM_ORDER_SERVICE_PORT", "8002"),
+)
+# Log dir (C: policy — OMNIWATCH_SIM_LOG_PATH or TEMP/TMP, never C: or repo tree)
+_SIM_LOG_DIR = _sim_env(
+    "OMNIWATCH_SIM_LOG_PATH", "SIM_LOG_PATH",
+    os.getenv("TEMP", os.getenv("TMP", "/tmp")))
+
+
 def sh(cmd, timeout=30):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -36,7 +57,7 @@ def ch_count(table):
 
 def kafka_end_offset(topic):
     out = sh(["docker", "exec", "omniwatch-kafka", "kafka-get-offsets",
-              "--bootstrap-server", "kafka:29092", "--topic", topic, "--time", "-1"], timeout=15)
+              "--bootstrap-server", _KAFKA_BOOTSTRAP, "--topic", topic, "--time", "-1"], timeout=15)
     best = 0
     for line in out.splitlines():
         p = line.split(":")
@@ -65,21 +86,21 @@ def neo4j_counts():
 
 def inject_scenario(scenario, ttl=90):
     """POST {scenario,ttl_seconds} to /__inject/anomaly on api-gateway/user/order."""
-    for port in ("8000", "8001", "8002"):
+    for port in _SIM_PORTS:
         try:
             data = json.dumps({"scenario": scenario, "ttl_seconds": ttl}).encode()
-            req = urllib.request.Request(f"http://localhost:{port}/__inject/anomaly",
+            req = urllib.request.Request(f"http://{_SIM_HOST}:{port}/__inject/anomaly",
                                          data=data,
                                          headers={"Content-Type": "application/json"},
                                          method="POST")
             urllib.request.urlopen(req, timeout=5).read()
         except Exception:
             pass
-    return f"injected {scenario} ttl={ttl}s to :8000,:8001,:8002"
+    return f"injected {scenario} ttl={ttl}s to {_SIM_PORTS}"
 
 
 def main():
-    tg_log = os.path.join(ROOT, "simulation", "traffic_run.log")
+    tg_log = os.path.join(_SIM_LOG_DIR, "traffic_run.log")
     tf = open(tg_log, "w")
     proc = subprocess.Popen([PY, "-u",
                              os.path.join(ROOT, "simulation", "traffic_generator.py"),

@@ -25,6 +25,9 @@
 # =============================================================================
 
 # -- ML / Statistics -----------------------------------------------------------
+# SKLEARN SPLIT (DYN-python): numpy>=1.26 + scikit-learn>=1.5 on py3.14 here.
+# The causal image keeps numpy==1.23.5 + scikit-learn<1.2 for PyRCA on
+# py3.10. Never install both requirement sets in one venv/image.
 scikit-learn>=1.5.0             # IsolationForest, StandardScaler (anomaly_detector.py)
 scipy>=1.13.0                   # Z-Score statistical detection (anomaly_detector.py)
 statsmodels>=0.14.0             # Seasonal naive baseline (planned seasonal component)

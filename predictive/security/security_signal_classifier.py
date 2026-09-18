@@ -24,12 +24,23 @@ from .priv_escalation_detector import PrivEscalationDetector
 
 logger = logging.getLogger("omniwatch.predictive.security.classifier")
 
-# Canonical Kafka topics (mirrors ingestion/kafka_bus.py)
-TOPIC_SECURITY_EVENTS = "omniwatch.security.events"
-TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
+def _env(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+# Canonical Kafka topics (mirrors ingestion/kafka_bus.py; registry-mapped,
+# env-overridable — semantics unchanged)
+TOPIC_SECURITY_EVENTS = _env(
+    "OMNIWATCH_KAFKA_TOPICS_SECURITY", "KAFKA_TOPIC_SECURITY",
+    "omniwatch.security.events")
+TOPIC_ANOMALIES_DETECTED = _env(
+    "OMNIWATCH_KAFKA_TOPICS_ANOMALIES", "KAFKA_TOPIC_ANOMALIES",
+    "omniwatch.anomalies.detected")
 
 # Consumer group for the security signal classifier
-CONSUMER_GROUP = "omniwatch-predictive-security"
+CONSUMER_GROUP = _env(
+    "OMNIWATCH_KAFKA_GROUP_SECURITY", "KAFKA_SECURITY_GROUP",
+    "omniwatch-predictive-security")
 
 
 class SecuritySignalClassifier:
@@ -50,7 +61,8 @@ class SecuritySignalClassifier:
     def __init__(
         self,
         bootstrap_servers: str = os.environ.get(
-            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+            "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS",
+            os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
         ),
         *,
         topic_in: str = TOPIC_SECURITY_EVENTS,

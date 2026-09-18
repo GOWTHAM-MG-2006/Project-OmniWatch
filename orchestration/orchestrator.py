@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Callable
 
@@ -31,11 +32,23 @@ _LOG: logging.Logger = create_logger("omniwatch.orchestration.orchestrator")
 _ALWAYS_APPROVAL: frozenset[str] = frozenset({"block_ip", "rotate_credentials"})
 
 # Retry constants: delay = min(BASE_DELAY * MULTIPLIER^attempt, MAX_DELAY)
-# 3 total attempts (1 initial + 2 retries)
-_MAX_RETRIES: int = 2
-_RETRY_BASE_DELAY: float = 1.0
-_RETRY_MULTIPLIER: float = 5.0
-_RETRY_MAX_DELAY: float = 25.0
+# 3 total attempts (1 initial + 2 retries). Env-overridable; defaults
+# preserve today's behavior.
+def _env_num(primary: str, fallback: str, default: str) -> float:
+    return float(os.getenv(primary, os.getenv(fallback, default)))
+
+
+_MAX_RETRIES: int = int(_env_num(
+    "OMNIWATCH_ORCH_MAX_RETRIES", "ORCH_MAX_RETRIES", "2"))
+_RETRY_BASE_DELAY: float = _env_num(
+    "OMNIWATCH_ORCH_RETRY_BASE_DELAY", "ORCH_RETRY_BASE_DELAY", "1.0")
+_RETRY_MULTIPLIER: float = _env_num(
+    "OMNIWATCH_ORCH_RETRY_MULTIPLIER", "ORCH_RETRY_MULTIPLIER", "5.0")
+_RETRY_MAX_DELAY: float = _env_num(
+    "OMNIWATCH_ORCH_RETRY_MAX_DELAY", "ORCH_RETRY_MAX_DELAY", "25.0")
+_AUDIT_BUCKET: str = str(os.getenv(
+    "OMNIWATCH_MINIO_BUCKETS_AUDIT",
+    os.getenv("MINIO_AUDIT_BUCKET", "omniwatch-audit-logs")))
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +406,7 @@ class Orchestrator:
             return
 
         try:
-            bucket = "omniwatch-audit-logs"
+            bucket = _AUDIT_BUCKET
             object_name = f"audit/{action_result.action_id}.json"
             payload = json.dumps(
                 {

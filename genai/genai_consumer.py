@@ -24,15 +24,27 @@ from genai.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-_KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-_KAFKA_GROUP = "omniwatch-genai-group"
+def _env(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+_KAFKA_BOOTSTRAP = _env(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS",
+    "localhost:9092")
+_KAFKA_GROUP = _env(
+    "OMNIWATCH_KAFKA_GROUP_GENAI", "KAFKA_GROUP",
+    "omniwatch-genai-group")
 _CONSUME_TOPICS = [
-    "omniwatch.incidents.created",
-    "omniwatch.remediation.actions",
+    _env("OMNIWATCH_KAFKA_TOPICS_CREATED", "KAFKA_TOPIC_CREATED",
+         "omniwatch.incidents.created"),
+    _env("OMNIWATCH_KAFKA_TOPICS_ACTIONS", "KAFKA_TOPIC_ACTIONS",
+         "omniwatch.remediation.actions"),
 ]
 
 # Timeout for async generator calls (seconds)
-_GENERATOR_TIMEOUT = 300.0
+_GENERATOR_TIMEOUT = float(_env(
+    "OMNIWATCH_GENAI_GENERATOR_TIMEOUT_SECONDS",
+    "GENAI_GENERATOR_TIMEOUT_SECONDS", "300.0"))
 
 
 class GenAIConsumer:
@@ -151,9 +163,9 @@ class GenAIConsumer:
             logger.error(json.dumps({"event": "message_parse_error", "error": str(exc)}))
             return
 
-        if topic == "omniwatch.incidents.created":
+        if topic == _CONSUME_TOPICS[0]:
             self._handle_incident(value)
-        elif topic == "omniwatch.remediation.actions":
+        elif topic == _CONSUME_TOPICS[1]:
             self._handle_remediation(value)
 
     # ------------------------------------------------------------------

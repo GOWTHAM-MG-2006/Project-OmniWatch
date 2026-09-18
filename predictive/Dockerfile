@@ -5,6 +5,8 @@
 # ---------------------------------------------------------------------------
 
 # == Stage 1: builder — install Python dependencies ==========================
+# SKLEARN SPLIT: numpy>=1.26 + scikit-learn>=1.5 here (py3.14); causal keeps
+# numpy==1.23.5 + scikit-learn<1.2 (py3.10). Never mix the two sets.
 FROM python:3.14-slim AS builder
 
 WORKDIR /build

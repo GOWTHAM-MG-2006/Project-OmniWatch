@@ -31,7 +31,17 @@ from storage.common import StorageError, create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.causal.dag_traversal")
 
-_DEFAULT_RULES_PATH = Path(__file__).resolve().parent / "config" / "causal_rules.yaml"
+def _default_rules_path() -> Path:
+    import os as _os
+
+    return Path(_os.getenv(
+        "OMNIWATCH_CAUSAL_RULES_PATH",
+        _os.getenv("CAUSAL_RULES_PATH", str(
+            Path(__file__).resolve().parent / "config" / "causal_rules.yaml")))
+    )
+
+
+_DEFAULT_RULES_PATH = _default_rules_path()
 
 # Confidence anchors (deterministic, documented for E2E assertions):
 # A path backed by learned Layer-2 causality is strong evidence; a path that

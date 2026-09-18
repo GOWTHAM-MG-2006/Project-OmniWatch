@@ -102,7 +102,10 @@ class ComplianceReportMeta(BaseModel):
         description="ISO 8601 generation timestamp",
     )
     bucket: str = Field(
-        default="omniwatch-audit-logs",
+        default_factory=lambda: __import__("os").getenv(
+            "OMNIWATCH_MINIO_BUCKETS_AUDIT",
+            __import__("os").getenv(
+                "MINIO_AUDIT_BUCKET", "omniwatch-audit-logs")),
         description="MinIO bucket where the report is stored",
     )
     object_key: str = Field(description="MinIO object key for the Markdown report")
@@ -124,7 +127,11 @@ class GroundedArtifact(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 generation timestamp",
     )
-    model_used: str = Field(default="qwen3:8b", description="LLM model used")
+    model_used: str = Field(
+        default_factory=lambda: __import__("os").getenv(
+            "OMNIWATCH_LLM_MODEL",
+            __import__("os").getenv("LLM_MODEL", "qwen3:8b")),
+        description="LLM model used")
     grounded: bool = Field(default=True, description="Whether output passed validation")
 
 

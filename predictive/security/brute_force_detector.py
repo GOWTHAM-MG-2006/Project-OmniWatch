@@ -10,6 +10,7 @@ Outputs: SecurityAnomalySignal for BRUTE_FORCE_ATTEMPT or None
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -21,14 +22,24 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# ─── Constants ────────────────────────────────────────────────────────────── #
+# ─── Constants (env-overridable; defaults preserve today's behavior) ───── #
 
-_DEFAULT_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml"
+_DEFAULT_RULES_PATH = Path(os.getenv(
+    "OMNIWATCH_SECURITY_RULES_PATH",
+    os.getenv("SECURITY_RULES_PATH", str(
+        Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml"))
+))
 
 # Default thresholds (used when YAML is unavailable)
-_DEFAULT_FAILURES_THRESHOLD = 10
-_DEFAULT_WINDOW_MINUTES = 5
-_DEFAULT_SEVERITY = "HIGH"
+_DEFAULT_FAILURES_THRESHOLD = int(os.getenv(
+    "OMNIWATCH_SECURITY_BRUTE_FORCE_THRESHOLD",
+    os.getenv("SECURITY_BRUTE_FORCE_THRESHOLD", "10")))
+_DEFAULT_WINDOW_MINUTES = int(os.getenv(
+    "OMNIWATCH_SECURITY_BRUTE_FORCE_WINDOW_MINUTES",
+    os.getenv("SECURITY_BRUTE_FORCE_WINDOW_MINUTES", "5")))
+_DEFAULT_SEVERITY = os.getenv(
+    "OMNIWATCH_SECURITY_BRUTE_FORCE_SEVERITY",
+    os.getenv("SECURITY_BRUTE_FORCE_SEVERITY", "HIGH"))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────── #

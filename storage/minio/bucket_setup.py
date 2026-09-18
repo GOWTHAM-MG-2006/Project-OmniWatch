@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+import os
+
 from minio import Minio
 from minio.lifecycleconfig import Expiration, LifecycleConfig, Rule
 
@@ -32,14 +34,34 @@ from storage.config import StorageConfig
 
 logger = create_logger("omniwatch.storage.minio.bucket_setup")
 
+
+def _bucket_env(primary: str, fallback: str, default: str) -> str:
+    """Bucket name with OMNIWATCH_* primary + old bare-name fallback."""
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
 # Kebab-case bucket names per AGENTS.md MinIO Buckets reference. The plan's IA
 # ("Infrequent Access") tier is not available on single-node MinIO — there are
 # no remote tiers, so lifecycle uses Expiration instead (see _lifecycle_for).
-BUCKET_TELEMETRY_ARCHIVE = "omniwatch-telemetry-archive"
-BUCKET_INCIDENTS = "omniwatch-incidents"
-BUCKET_AUDIT_LOGS = "omniwatch-audit-logs"
-BUCKET_RUNBOOKS = "omniwatch-runbooks"
-BUCKET_ML_DATASETS = "omniwatch-ml-datasets"
+# Every name is env-overridable (OMNIWATCH_MINIO_BUCKETS_*); defaults preserve
+# today's behavior. omniwatch-dashboards is consumed by dashboard/api/main.py
+# but was never created here — it is now bootstrapped (no lifecycle: live data).
+BUCKET_TELEMETRY_ARCHIVE = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_TELEMETRY", "MINIO_BUCKET_TELEMETRY",
+    "omniwatch-telemetry-archive")
+BUCKET_INCIDENTS = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_INCIDENTS", "MINIO_BUCKET_INCIDENTS",
+    "omniwatch-incidents")
+BUCKET_AUDIT_LOGS = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_AUDIT", "MINIO_BUCKET_AUDIT", "omniwatch-audit-logs")
+BUCKET_RUNBOOKS = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_RUNBOOKS", "MINIO_BUCKET_RUNBOOKS",
+    "omniwatch-runbooks")
+BUCKET_ML_DATASETS = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_ML", "MINIO_BUCKET_ML", "omniwatch-ml-datasets")
+BUCKET_DASHBOARDS = _bucket_env(
+    "OMNIWATCH_MINIO_BUCKETS_DASHBOARDS", "MINIO_BUCKET_DASHBOARDS",
+    "omniwatch-dashboards")
 
 # Bucket name -> retention days (objects expire after N days). Buckets ABSENT
 # from this map get no lifecycle policy at all (runbooks / ml-datasets are
@@ -138,6 +160,7 @@ def setup_buckets(
         BUCKET_AUDIT_LOGS,
         BUCKET_RUNBOOKS,
         BUCKET_ML_DATASETS,
+        BUCKET_DASHBOARDS,
     ]
     for bucket_name in names:
         _ensure_bucket(client, bucket_name)

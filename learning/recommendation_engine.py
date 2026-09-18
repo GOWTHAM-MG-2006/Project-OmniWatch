@@ -22,14 +22,26 @@ import clickhouse_connect
 logger = logging.getLogger("omniwatch.learning.recommendation_engine")
 
 # ClickHouse connection settings (env vars match feedback_loop.py pattern)
-CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "omniwatch")
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+def _L(primary: str, fallback: str, default: str) -> str:
+    """OMNIWATCH_* primary with old bare-name fallback (backwards compat)."""
+    return os.environ.get(primary, os.environ.get(fallback, default))
+
+
+CLICKHOUSE_HOST = _L(
+    "OMNIWATCH_CLICKHOUSE_HOST", "CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(_L(
+    "OMNIWATCH_CLICKHOUSE_HTTP_PORT", "CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_DB = _L(
+    "OMNIWATCH_CLICKHOUSE_DB", "CLICKHOUSE_DB", "omniwatch")
+CLICKHOUSE_USER = _L(
+    "OMNIWATCH_CLICKHOUSE_USER", "CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = _L(
+    "OMNIWATCH_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD", "")
 
 # Maximum recommendations to return
-MAX_RECOMMENDATIONS = 3
+MAX_RECOMMENDATIONS = int(_L(
+    "OMNIWATCH_LEARNING_MAX_RECOMMENDATIONS",
+    "LEARNING_MAX_RECOMMENDATIONS", "3"))
 
 # Query: top actions by cumulative success_count for a given entity
 _RECOMMENDATION_QUERY = """

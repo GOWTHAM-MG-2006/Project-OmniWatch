@@ -26,21 +26,39 @@ from neo4j import Driver, GraphDatabase
 logger = logging.getLogger("omniwatch.learning.pattern_mining")
 
 # ClickHouse connection (env vars match feedback_loop.py pattern)
-CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "omniwatch")
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+def _L(primary: str, fallback: str, default: str) -> str:
+    """OMNIWATCH_* primary with old bare-name fallback (backwards compat)."""
+    return os.environ.get(primary, os.environ.get(fallback, default))
+
+
+CLICKHOUSE_HOST = _L(
+    "OMNIWATCH_CLICKHOUSE_HOST", "CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(_L(
+    "OMNIWATCH_CLICKHOUSE_HTTP_PORT", "CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_DB = _L(
+    "OMNIWATCH_CLICKHOUSE_DB", "CLICKHOUSE_DB", "omniwatch")
+CLICKHOUSE_USER = _L(
+    "OMNIWATCH_CLICKHOUSE_USER", "CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = _L(
+    "OMNIWATCH_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD", "")
 
 # Neo4j connection
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "omniwatch")
+NEO4J_URI = _L(
+    "OMNIWATCH_NEO4J_URI", "NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = _L(
+    "OMNIWATCH_NEO4J_USER", "NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = _L(
+    "OMNIWATCH_NEO4J_PASSWORD", "NEO4J_PASSWORD", "omniwatch")
 
 # Mining parameters
-DEFAULT_INTERVAL_SECONDS = int(os.environ.get("PATTERN_MINING_INTERVAL", "900"))
-DEFAULT_LOOKBACK_HOURS = int(os.environ.get("PATTERN_MINING_LOOKBACK_HOURS", "24"))
-DEFAULT_MIN_OCCURRENCES = int(os.environ.get("PATTERN_MINING_MIN_OCCURRENCES", "2"))
+DEFAULT_INTERVAL_SECONDS = int(_L(
+    "OMNIWATCH_PATTERN_MINING_INTERVAL", "PATTERN_MINING_INTERVAL", "900"))
+DEFAULT_LOOKBACK_HOURS = int(_L(
+    "OMNIWATCH_PATTERN_MINING_LOOKBACK_HOURS",
+    "PATTERN_MINING_LOOKBACK_HOURS", "24"))
+DEFAULT_MIN_OCCURRENCES = int(_L(
+    "OMNIWATCH_PATTERN_MINING_MIN_OCCURRENCES",
+    "PATTERN_MINING_MIN_OCCURRENCES", "2"))
 
 # SQL to query recurring incident patterns from ClickHouse.
 # Groups by root_cause_entity + severity + hourly time bucket.

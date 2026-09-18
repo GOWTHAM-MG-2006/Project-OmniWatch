@@ -18,7 +18,25 @@ from typing import Any
 from causal.config.settings import Settings
 from storage.common import StorageError, create_logger
 
-TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
+
+def _topic_env(primary: str, fallback: str, default: str) -> str:
+    import os as _os
+
+    return _os.getenv(primary, _os.getenv(fallback, default))
+
+
+TOPIC_ANOMALIES_DETECTED = _topic_env(
+    "OMNIWATCH_KAFKA_TOPICS_ANOMALIES", "KAFKA_TOPIC_ANOMALIES",
+    "omniwatch.anomalies.detected")
+
+
+def _resolve_topic(settings: Settings | None, attr: str, default: str) -> str:
+    """Prefer the settings registry value; fall back to module default."""
+    if settings is not None:
+        value = getattr(settings, attr, None)
+        if value:
+            return str(value)
+    return default
 
 _LOG = create_logger("omniwatch.causal.causal_consumer")
 _LOG.setLevel(logging.INFO)
@@ -84,8 +102,10 @@ class CausalConsumer:
                 "kafka-python-ng is not installed; cannot start causal consumer"
             ) from exc
 
+        topic = _resolve_topic(
+            self._settings, "kafka_topic_anomalies", TOPIC_ANOMALIES_DETECTED)
         self._consumer = _KafkaConsumer(
-            TOPIC_ANOMALIES_DETECTED,
+            topic,
             bootstrap_servers=self._settings.kafka_bootstrap_servers,
             group_id=self._settings.kafka_group_id,
             auto_offset_reset=self._settings.kafka_auto_offset_reset,
@@ -93,7 +113,7 @@ class CausalConsumer:
         )
         _LOG.info(
             "causal consumer started on %s (group=%s)",
-            TOPIC_ANOMALIES_DETECTED,
+            topic,
             self._settings.kafka_group_id,
         )
         try:

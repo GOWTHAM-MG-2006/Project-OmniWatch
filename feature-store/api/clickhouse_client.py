@@ -27,7 +27,28 @@ import clickhouse_connect
 RETRY_BACKOFF_SECONDS: List[float] = [0.1, 0.5, 2.0]
 
 # Default time range when start/end are omitted: last 24 hours.
-DEFAULT_WINDOW_HOURS = 24
+DEFAULT_WINDOW_HOURS = int(os.getenv(
+    "OMNIWATCH_FEATURE_STORE_WINDOW_HOURS",
+    os.getenv("FEATURE_STORE_WINDOW_HOURS", "24")))
+
+
+def clickhouse_timezone() -> Any:
+    """Timezone assumed for naive datetimes (ClickHouse DateTime has no tz).
+
+    OMNIWATCH_CLICKHOUSE_TIMEZONE primary, CLICKHOUSE_TIMEZONE fallback,
+    UTC default (byte-identical to today). zoneinfo names accepted.
+    """
+    name = os.getenv(
+        "OMNIWATCH_CLICKHOUSE_TIMEZONE",
+        os.getenv("CLICKHOUSE_TIMEZONE", "UTC"))
+    if name.upper() == "UTC":
+        return timezone.utc
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.utc
 
 # The 15-column feature_vectors schema (plan Task 14 / notepad learnings).
 FEATURE_VECTOR_COLUMNS: List[str] = [
@@ -85,12 +106,18 @@ class ClickHouseClient:
         connect_timeout: int = 10,
         send_receive_timeout: int = 30,
     ) -> None:
-        self._host = host or os.getenv("CLICKHOUSE_HOST", "clickhouse")
+        self._host = host or os.getenv(
+            "OMNIWATCH_CLICKHOUSE_HOST",
+            os.getenv("CLICKHOUSE_HOST", "clickhouse"))
         self._port = port if port is not None else self._resolve_port()
-        self._database = database or os.getenv("CLICKHOUSE_DB", "omniwatch")
-        self._username = username or os.getenv("CLICKHOUSE_USER", "default")
+        self._database = database or os.getenv(
+            "OMNIWATCH_CLICKHOUSE_DB", os.getenv("CLICKHOUSE_DB", "omniwatch"))
+        self._username = username or os.getenv(
+            "OMNIWATCH_CLICKHOUSE_USER", os.getenv("CLICKHOUSE_USER", "default"))
         self._password = (
-            password if password is not None else os.getenv("CLICKHOUSE_PASSWORD", "")
+            password if password is not None else os.getenv(
+                "OMNIWATCH_CLICKHOUSE_PASSWORD",
+                os.getenv("CLICKHOUSE_PASSWORD", ""))
         )
         self._connect_timeout = connect_timeout
         self._send_receive_timeout = send_receive_timeout
@@ -99,13 +126,16 @@ class ClickHouseClient:
 
     @staticmethod
     def _resolve_port() -> int:
-        """Port precedence: CLICKHOUSE_HTTP_PORT, then CLICKHOUSE_PORT.
+        """Port precedence: OMNIWATCH_CLICKHOUSE_HTTP_PORT, then
+        CLICKHOUSE_HTTP_PORT, then CLICKHOUSE_PORT.
 
         ``.env.example`` sets CLICKHOUSE_PORT=9000 (native) alongside
         CLICKHOUSE_HTTP_PORT=8123 (HTTP); clickhouse-connect speaks HTTP, so
         the HTTP port wins. Falls back to the task contract default 8123.
         """
-        http_port = os.getenv("CLICKHOUSE_HTTP_PORT")
+        http_port = os.getenv(
+            "OMNIWATCH_CLICKHOUSE_HTTP_PORT",
+            os.getenv("CLICKHOUSE_HTTP_PORT", ""))
         if http_port:
             return int(http_port)
         return int(os.getenv("CLICKHOUSE_PORT", "8123"))

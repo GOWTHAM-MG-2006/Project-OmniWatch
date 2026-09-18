@@ -21,9 +21,14 @@ from storage.common import StorageError, create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.prioritization.severity_classifier")
 
-_DEFAULT_RULES_PATH = os.path.join(
-    os.path.dirname(__file__), "config", "classification_rules.yaml"
-)
+def _default_rules_path() -> str:
+    return os.getenv(
+        "OMNIWATCH_CLASSIFICATION_RULES_PATH",
+        os.getenv("PRIORITIZATION_CLASSIFICATION_RULES_PATH", os.path.join(
+            os.path.dirname(__file__), "config", "classification_rules.yaml")))
+
+
+_DEFAULT_RULES_PATH = _default_rules_path()
 
 # P1 severity conditions: ALL must be true (AND)
 # P2/P3: ANY must be true (OR, via conditions_any)

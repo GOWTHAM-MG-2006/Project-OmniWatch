@@ -209,7 +209,9 @@ class ClickHouseClient:
                 if not row:
                     continue
                 name = str(row[0])
-                count = client.query(f"SELECT count(*) FROM omniwatch.{name}").result_rows[0][0]
+                count = client.query(
+                    f"SELECT count(*) FROM {self._database}.{name}"
+                ).result_rows[0][0]
                 stats[name] = int(count)
             return stats
 
@@ -336,7 +338,7 @@ class ClickHouseClient:
             "created_at" if table in CREATED_AT_TABLES else "timestamp"
         )
         sql = (
-            f"SELECT * FROM omniwatch.{table} "
+            f"SELECT * FROM {self._database}.{table} "
             "WHERE entity_id = %(entity_id)s "
             f"ORDER BY {order_col} DESC LIMIT %(limit)s"
         )
@@ -367,7 +369,7 @@ class ClickHouseClient:
             "  stddevSamp(value) AS stddev, "
             "  quantile(0.95)(value) AS p95, "
             "  count(*) AS cnt "
-            "FROM omniwatch.metrics "
+            f"FROM {self._database}.metrics "
             "WHERE entity_id = %(entity_id)s "
             "  AND metric_name = %(metric_name)s "
             "  AND timestamp >= %(start)s "
@@ -459,7 +461,7 @@ def select_pending_approvals(limit: int = 100) -> list[dict[str, Any]]:
     client = ClickHouseClient()
     try:
         sql = (
-            "SELECT * FROM omniwatch.pending_approvals "
+            f"SELECT * FROM {client._database}.pending_approvals "
             "WHERE status = 'pending' "
             "ORDER BY created_at DESC LIMIT %(limit)s"
         )
@@ -485,7 +487,7 @@ def update_approval_decision(
     client = ClickHouseClient()
     try:
         sql = (
-            "ALTER TABLE omniwatch.pending_approvals "
+            f"ALTER TABLE {client._database}.pending_approvals "
             "UPDATE status = %(status)s, decided_at = %(decided_at)s "
             "WHERE approval_id = %(approval_id)s"
         )

@@ -25,8 +25,19 @@ from storage.common import create_logger
 
 _LOG: logging.Logger = create_logger("omniwatch.causal.dependency_discovery")
 
-_DEFAULT_WINDOW_HOURS = 6
-_DEFAULT_EDGE_LIMIT = 500
+
+def _env_int(primary: str, fallback: str, default: int) -> int:
+    import os as _os
+
+    return int(_os.getenv(primary, _os.getenv(fallback, str(default))))
+
+
+_DEFAULT_WINDOW_HOURS = _env_int(
+    "OMNIWATCH_CAUSAL_DISCOVERY_WINDOW_HOURS",
+    "CAUSAL_DISCOVERY_WINDOW_HOURS", 6)
+_DEFAULT_EDGE_LIMIT = _env_int(
+    "OMNIWATCH_CAUSAL_DISCOVERY_EDGE_LIMIT",
+    "CAUSAL_DISCOVERY_EDGE_LIMIT", 500)
 
 
 @dataclass
@@ -90,21 +101,28 @@ class DependencyDiscovery:
                 from storage.config import StorageConfig
 
                 cfg = StorageConfig.from_env()
+                # clickhouse_driver is the NATIVE protocol client — it needs
+                # the native port (9000), not the HTTP port (8123).
+                native_port = getattr(
+                    cfg, "clickhouse_native_port",
+                    getattr(cfg, "clickhouse_port", 9000))
                 client = ChClient(
                     host=cfg.clickhouse_host,
-                    port=cfg.clickhouse_port,
+                    port=native_port,
                     user=cfg.clickhouse_user,
                     password=cfg.clickhouse_password,
                     database=cfg.clickhouse_db,
                     settings={"use_numpy": False},
                 )
                 self._clickhouse = client
+                self._clickhouse_db = cfg.clickhouse_db
             except Exception as exc:  # noqa: BLE001 - simulation-first fallback
                 _LOG.warning("clickhouse unavailable, skipping trace discovery: %s", exc)
                 return []
 
         window = max(1, int(window_hours))
         edge_limit = max(1, int(limit))
+        db = getattr(self, "_clickhouse_db", None) or "omniwatch"
         sql = (
             "SELECT "
             "  parent.service_name AS source, "
@@ -114,8 +132,8 @@ class DependencyDiscovery:
             "  quantile(0.50)(child.duration_ms) AS latency_p50, "
             "  quantile(0.95)(child.duration_ms) AS latency_p95, "
             "  quantile(0.99)(child.duration_ms) AS latency_p99 "
-            "FROM omniwatch.traces child "
-            "INNER JOIN omniwatch.traces parent "
+            f"FROM {db}.traces child "
+            f"INNER JOIN {db}.traces parent "
             "  ON parent.trace_id = child.trace_id "
             " AND parent.span_id = child.parent_span_id "
             f"WHERE child.timestamp >= now() - INTERVAL {window} HOUR "

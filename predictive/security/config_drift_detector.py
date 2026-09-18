@@ -22,9 +22,19 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# ─── Constants ────────────────────────────────────────────────────────────── #
+# ─── Constants (rules path env-overridable) ─────────────────────────────── #
 
-_DEFAULT_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml"
+def _default_rules_path() -> Path:
+    import os as _os
+
+    return Path(_os.getenv(
+        "OMNIWATCH_SECURITY_RULES_PATH",
+        _os.getenv("SECURITY_RULES_PATH", str(
+            Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml")))
+    )
+
+
+_DEFAULT_RULES_PATH = _default_rules_path()
 
 # Patterns that indicate a config drift event
 _CONFIG_DRIFT_PATTERNS: list[re.Pattern[str]] = [

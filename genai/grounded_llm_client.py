@@ -27,11 +27,21 @@ from genai.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Retry constants (FM-5: exponential backoff with cap)
-_LLM_RETRY_DELAY: float = 0.5
-_LLM_RETRY_MULTIPLIER: float = 2.0
-_LLM_RETRY_MAX_DELAY: float = 8.0
-_LLM_MAX_RETRIES: int = 2
+# Retry constants (FM-5: exponential backoff with cap; env-overridable)
+def _llm_env_num(primary: str, fallback: str, default: str) -> float:
+    import os as _os
+
+    return float(_os.getenv(primary, _os.getenv(fallback, default)))
+
+
+_LLM_RETRY_DELAY: float = _llm_env_num(
+    "OMNIWATCH_LLM_RETRY_DELAY", "LLM_RETRY_DELAY", "0.5")
+_LLM_RETRY_MULTIPLIER: float = _llm_env_num(
+    "OMNIWATCH_LLM_RETRY_MULTIPLIER", "LLM_RETRY_MULTIPLIER", "2.0")
+_LLM_RETRY_MAX_DELAY: float = _llm_env_num(
+    "OMNIWATCH_LLM_RETRY_MAX_DELAY", "LLM_RETRY_MAX_DELAY", "8.0")
+_LLM_MAX_RETRIES: int = int(_llm_env_num(
+    "OMNIWATCH_LLM_MAX_RETRIES", "LLM_MAX_RETRIES", "2"))
 
 # System prompt — enforces grounded output
 _SYSTEM_PROMPT = """You are OmniWatch, an AIOps root-cause analyst. You MUST ground ALL your analysis in the supplied RootCauseObject.

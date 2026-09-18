@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
 import sys
 import threading
@@ -37,10 +38,24 @@ from typing import Any
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Service hosts (localhost ports from docker-compose.yml)
-DEFAULT_ORDER_HOST = "localhost:8002"
-DEFAULT_USER_HOST = "localhost:8001"
+# Service hosts (localhost ports from docker-compose.yml; env-overridable)
+_SIM_HOST = os.getenv(
+    "OMNIWATCH_SIM_HOST", os.getenv("SIM_HOST", "localhost"))
+DEFAULT_ORDER_HOST = os.getenv(
+    "OMNIWATCH_SIM_ORDER_HOST",
+    os.getenv(
+        "SIM_ORDER_HOST",
+        f"{_SIM_HOST}:{os.getenv('OMNIWATCH_SIM_ORDER_SERVICE_PORT', os.getenv('SIM_ORDER_SERVICE_PORT', '8002'))}"))
+DEFAULT_USER_HOST = os.getenv(
+    "OMNIWATCH_SIM_USER_HOST",
+    os.getenv(
+        "SIM_USER_HOST",
+        f"{_SIM_HOST}:{os.getenv('OMNIWATCH_SIM_USER_SERVICE_PORT', os.getenv('SIM_USER_SERVICE_PORT', '8001'))}"))
 ANOMALY_PATH = "/__inject/anomaly"
+# Simulation log path (C: policy — never repo tree or C:; E:\OmniWatch-Test-Files or /tmp)
+SIM_LOG_PATH = os.getenv(
+    "OMNIWATCH_SIM_LOG_PATH",
+    os.getenv("SIM_LOG_PATH", os.getenv("TEMP", os.getenv("TMP", "/tmp"))))
 
 # Product catalogue for order creation
 PRODUCTS = [

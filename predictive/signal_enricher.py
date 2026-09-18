@@ -32,7 +32,15 @@ _CONTEXT_KEYS = ("name", "type", "criticality", "anomaly_score", "last_seen")
 
 # Default wall-clock budget for a single Neo4j lookup. If the graph is
 # unreachable or slow, we degrade gracefully instead of blocking the pipeline.
-DEFAULT_TIMEOUT_SECONDS = 2.0
+def _default_timeout() -> float:
+    import os as _os
+
+    return float(_os.getenv(
+        "OMNIWATCH_PREDICTIVE_ENRICHER_TIMEOUT_SECONDS",
+        _os.getenv("PREDICTIVE_ENRICHER_TIMEOUT_SECONDS", "2.0")))
+
+
+DEFAULT_TIMEOUT_SECONDS = _default_timeout()
 
 
 class SignalEnricher:

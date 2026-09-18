@@ -21,14 +21,27 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Defaults (overridden by security_rules.yaml when available)
+# Defaults (overridden by security_rules.yaml when available; every knob is
+# env-overridable with OMNIWATCH_SECURITY_* primary + bare fallback)
 # ---------------------------------------------------------------------------
-DEFAULT_OUTBOUND_RATIO: float = 3.0
-DEFAULT_SEVERITY: str = "HIGH"
-DEFAULT_CONFIDENCE: float = 85.0
-DEFAULT_WINDOW_SECONDS: int = 60
+DEFAULT_OUTBOUND_RATIO: float = float(os.getenv(
+    "OMNIWATCH_SECURITY_EXFIL_RATIO",
+    os.getenv("SECURITY_EXFIL_RATIO", "3.0")))
+DEFAULT_SEVERITY: str = os.getenv(
+    "OMNIWATCH_SECURITY_EXFIL_SEVERITY",
+    os.getenv("SECURITY_EXFIL_SEVERITY", "HIGH"))
+DEFAULT_CONFIDENCE: float = float(os.getenv(
+    "OMNIWATCH_SECURITY_EXFIL_CONFIDENCE",
+    os.getenv("SECURITY_EXFIL_CONFIDENCE", "85.0")))
+DEFAULT_WINDOW_SECONDS: int = int(os.getenv(
+    "OMNIWATCH_SECURITY_EXFIL_WINDOW_SECONDS",
+    os.getenv("SECURITY_EXFIL_WINDOW_SECONDS", "60")))
 
-_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml"
+_RULES_PATH = Path(os.getenv(
+    "OMNIWATCH_SECURITY_RULES_PATH",
+    os.getenv("SECURITY_RULES_PATH", str(
+        Path(__file__).resolve().parent.parent / "config" / "security_rules.yaml")))
+)
 
 
 def _load_rules(config_path: Optional[str] = None) -> Dict[str, Any]:

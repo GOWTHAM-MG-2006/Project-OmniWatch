@@ -27,7 +27,8 @@ from genai.runbook_generator import RunbookGenerator
 
 logger = logging.getLogger(__name__)
 
-_GENAI_PORT = int(os.getenv("GENAI_API_PORT", "8020"))
+_GENAI_PORT = int(os.getenv(
+    "OMNIWATCH_GENAI_PORT", os.getenv("GENAI_API_PORT", "8020")))
 
 _stats: dict[str, int] = {
     "requests": 0,

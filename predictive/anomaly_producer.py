@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any
@@ -22,12 +23,24 @@ from .config.settings import Settings
 
 logger = logging.getLogger("omniwatch.predictive.anomaly_producer")
 
-# Canonical Kafka topic (mirrors ingestion/kafka_bus.py TOPIC_ANOMALIES_DETECTED)
-TOPIC_ANOMALIES_DETECTED = "omniwatch.anomalies.detected"
 
-# Circuit-breaker defaults
-_CB_FAILURE_THRESHOLD = 5
-_CB_COOLDOWN_SECONDS = 30.0
+def _env(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+# Canonical Kafka topic (mirrors ingestion/kafka_bus.py TOPIC_ANOMALIES_DETECTED;
+# registry-mapped, env-overridable — semantics unchanged)
+TOPIC_ANOMALIES_DETECTED = _env(
+    "OMNIWATCH_KAFKA_TOPICS_ANOMALIES", "KAFKA_TOPIC_ANOMALIES",
+    "omniwatch.anomalies.detected")
+
+# Circuit-breaker defaults (env-overridable)
+_CB_FAILURE_THRESHOLD = int(_env(
+    "OMNIWATCH_PREDICTIVE_CB_FAILURE_THRESHOLD",
+    "PREDICTIVE_CB_FAILURE_THRESHOLD", "5"))
+_CB_COOLDOWN_SECONDS = float(_env(
+    "OMNIWATCH_PREDICTIVE_CB_COOLDOWN_SECONDS",
+    "PREDICTIVE_CB_COOLDOWN_SECONDS", "30.0"))
 
 
 class AnomalyProducer:
@@ -167,7 +180,7 @@ class AnomalyProducer:
         if self._ch_client is None:
             cfg = StorageConfig(
                 clickhouse_host=self._settings.clickhouse_host,
-                clickhouse_port=self._settings.clickhouse_port,
+                clickhouse_http_port=self._settings.clickhouse_port,
                 clickhouse_db=self._settings.clickhouse_db,
                 clickhouse_user=self._settings.clickhouse_user,
                 clickhouse_password=self._settings.clickhouse_password,

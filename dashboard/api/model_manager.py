@@ -27,12 +27,21 @@ _LOG = logging.getLogger("omniwatch.model_manager")
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_SETTINGS_PATH = os.getenv(
+def _mm_env(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+_DEFAULT_SETTINGS_PATH = _mm_env(
+    "OMNIWATCH_MODEL_SETTINGS_PATH",
     "MODEL_SETTINGS_PATH",
     str(Path(__file__).resolve().parents[2] / ".omniwatch" / "model-settings.json"),
 )
 
-_OLLAMA_LOCAL_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+_DEFAULT_MODEL_NAME = _mm_env(
+    "OMNIWATCH_LLM_MODEL", "LLM_MODEL", "qwen3:8b")
+
+_OLLAMA_LOCAL_URL = _mm_env(
+    "OMNIWATCH_LLM_URL", "OLLAMA_URL", "http://localhost:11434")
 _OLLAMA_CLOUD_URL = "https://api.ollama.com"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1"
 _GROQ_URL = "https://api.groq.com/openai/v1"
@@ -60,11 +69,15 @@ class ModelProvider(str, Enum):
 class ModelSettings:
     """LLM provider configuration."""
     provider: ModelProvider = ModelProvider.OLLAMA
-    model_name: str = "qwen3:8b"
+    model_name: str = field(default_factory=lambda: _DEFAULT_MODEL_NAME)
     api_key: str = ""
     base_url: str = ""  # derived from provider if empty
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = field(
+        default_factory=lambda: float(_mm_env(
+            "OMNIWATCH_LLM_TEMPERATURE", "LLM_TEMPERATURE", "0.7")))
+    max_tokens: int = field(
+        default_factory=lambda: int(_mm_env(
+            "OMNIWATCH_LLM_MAX_TOKENS", "LLM_MAX_TOKENS", "2048")))
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -83,11 +96,17 @@ class ModelSettings:
             provider = ModelProvider.OLLAMA
         return cls(
             provider=provider,
-            model_name=data.get("model_name", "qwen3:8b"),
+            model_name=data.get("model_name", _DEFAULT_MODEL_NAME),
             api_key=data.get("api_key", ""),
             base_url=data.get("base_url", ""),
-            temperature=float(data.get("temperature", 0.7)),
-            max_tokens=int(data.get("max_tokens", 2048)),
+            temperature=float(data.get(
+                "temperature",
+                _mm_env("OMNIWATCH_LLM_TEMPERATURE",
+                       "LLM_TEMPERATURE", "0.7"))),
+            max_tokens=int(data.get(
+                "max_tokens",
+                _mm_env("OMNIWATCH_LLM_MAX_TOKENS",
+                       "LLM_MAX_TOKENS", "2048"))),
         )
 
 

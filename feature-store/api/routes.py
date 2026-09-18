@@ -19,9 +19,17 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 try:
-    from .clickhouse_client import ClickHouseClient, ClickHouseUnavailable
+    from .clickhouse_client import (
+        ClickHouseClient,
+        ClickHouseUnavailable,
+        clickhouse_timezone,
+    )
 except ImportError:  # pragma: no cover - python main.py direct-run mode
-    from clickhouse_client import ClickHouseClient, ClickHouseUnavailable
+    from clickhouse_client import (
+        ClickHouseClient,
+        ClickHouseUnavailable,
+        clickhouse_timezone,
+    )
 
 
 class FeatureVector(BaseModel):
@@ -53,14 +61,19 @@ router = APIRouter(tags=["features"])
 
 
 def _parse_iso(value: str) -> datetime:
-    """Parse an ISO 8601 string to a naive UTC datetime (ClickHouse DateTime)."""
+    """Parse an ISO 8601 string to a naive UTC datetime (ClickHouse DateTime).
+
+    Naive inputs are assumed to be in OMNIWATCH_CLICKHOUSE_TIMEZONE
+    (default UTC — byte-identical to today) and converted to UTC.
+    """
     text = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         dt = datetime.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(f"invalid ISO 8601 timestamp: {value!r}") from exc
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=clickhouse_timezone())
+    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 

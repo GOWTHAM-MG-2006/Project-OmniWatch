@@ -25,9 +25,18 @@ from minio.helpers import ObjectWriteResult
 from storage.common import StorageError, create_logger, retry_with_backoff
 from storage.config import StorageConfig
 
-# AGENTS.md MinIO buckets: this client consumes them; bucket_setup.py (a
-# parallel task) owns their creation. Used as the primary health probe bucket.
-HEALTH_CHECK_BUCKET: str = "omniwatch-telemetry-archive"
+# AGENTS.md MinIO buckets: this client consumes them; bucket_setup.py owns
+# their creation. Used as the primary health probe bucket (env-overridable).
+def _default_health_bucket() -> str:
+    import os
+
+    return os.getenv(
+        "OMNIWATCH_MINIO_BUCKETS_TELEMETRY",
+        os.getenv("MINIO_BUCKET_TELEMETRY", "omniwatch-telemetry-archive"),
+    )
+
+
+HEALTH_CHECK_BUCKET: str = _default_health_bucket()
 
 # Matches the 3x exponential backoff contract in storage/common.py.
 _RETRIES: int = 3

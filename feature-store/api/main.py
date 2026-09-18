@@ -60,6 +60,11 @@ def health_check() -> dict:
 
 
 if __name__ == "__main__":
+    import os as _os
+
     # Direct run:  python main.py          (from feature-store/api)
     # Package run: uvicorn feature-store.api.main:app --port 8005  (from repo root)
-    uvicorn.run(app, host="0.0.0.0", port=8005, log_level="info")
+    _port = int(_os.getenv(
+        "OMNIWATCH_FEATURE_STORE_PORT",
+        _os.getenv("FEATURE_STORE_API_PORT", "8005")))
+    uvicorn.run(app, host="0.0.0.0", port=_port, log_level="info")

@@ -10,6 +10,7 @@ Outputs: SecurityAnomalySignal if escalation detected, None otherwise
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,9 +19,20 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # ── Default configuration (overridden by security_rules.yaml) ─────────── #
-_DEFAULT_PATTERNS: List[str] = ["sudo", "su", "escalat", "role_change"]
-_DEFAULT_SEVERITY: str = "CRITICAL"
-_DEFAULT_CONFIDENCE: float = 90.0
+def _default_patterns() -> List[str]:
+    raw = os.getenv(
+        "OMNIWATCH_SECURITY_PRIV_PATTERNS",
+        os.getenv("SECURITY_PRIV_PATTERNS", "sudo,su,escalat,role_change"))
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+_DEFAULT_PATTERNS: List[str] = _default_patterns()
+_DEFAULT_SEVERITY: str = os.getenv(
+    "OMNIWATCH_SECURITY_PRIV_SEVERITY",
+    os.getenv("SECURITY_PRIV_SEVERITY", "CRITICAL"))
+_DEFAULT_CONFIDENCE: float = float(os.getenv(
+    "OMNIWATCH_SECURITY_PRIV_CONFIDENCE",
+    os.getenv("SECURITY_PRIV_CONFIDENCE", "90.0")))
 
 # Known admin entities that should NOT trigger alerts for normal operations.
 _ADMIN_IDENTIFIERS: frozenset[str] = frozenset({

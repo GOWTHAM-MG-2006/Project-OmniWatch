@@ -31,6 +31,26 @@ data:
   PREDICTIVE_SEASONALITY_PERIOD: "24"
   PREDICTIVE_LOOKBACK_WINDOW: "168"
   PREDICTIVE_SECURITY_ENABLED: "true"
+  # DYN-python passthrough: OMNIWATCH_* primary names mirror the bare names
+  # above (same values; app prefers OMNIWATCH_* with bare fallback).
+  OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  OMNIWATCH_CLICKHOUSE_HOST: clickhouse
+  OMNIWATCH_CLICKHOUSE_HTTP_PORT: "8123"
+  OMNIWATCH_CLICKHOUSE_NATIVE_PORT: "9000"
+  OMNIWATCH_CLICKHOUSE_DB: omniwatch
+  OMNIWATCH_CLICKHOUSE_USER: default
+  OMNIWATCH_CLICKHOUSE_PASSWORD: ""
+  OMNIWATCH_NEO4J_URI: bolt://neo4j:7687
+  OMNIWATCH_NEO4J_USER: neo4j
+  OMNIWATCH_NEO4J_PASSWORD: omniwatch
+  OMNIWATCH_MINIO_ENDPOINT: minio:9010
+  OMNIWATCH_MINIO_ACCESS_KEY: minioadmin
+  OMNIWATCH_MINIO_SECRET_KEY: minioadmin
+  OMNIWATCH_MINIO_SECURE: "false"
+  OMNIWATCH_PREDICTIVE_SCORE_THRESHOLD: "0.7"
+  OMNIWATCH_PREDICTIVE_CONFIDENCE: "60.0"
+  OMNIWATCH_PREDICTIVE_COLD_START_SAMPLE_COUNT: "30"
+  OMNIWATCH_PREDICTIVE_PORT: "8007"
   # IND-7 leader election (K8s Lease singleton). Disabled by default:
   # replicas run standalone exactly as before. Set ENABLED to "true"
   # (and grant k8s/predictive/rbac.yaml) for 1-leader/N-replica mode.

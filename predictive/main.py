@@ -302,7 +302,10 @@ def _check_model_loaded() -> bool:
             return True
 
     # Also check environment variable hint (useful when model is loaded in-memory)
-    if os.environ.get("PREDICTIVE_MODEL_LOADED", "").lower() in ("1", "true", "yes"):
+    _loaded_hint = os.getenv(
+        "OMNIWATCH_PREDICTIVE_MODEL_LOADED",
+        os.getenv("PREDICTIVE_MODEL_LOADED", ""))
+    if _loaded_hint.lower() in ("1", "true", "yes"):
         return True
 
     return False
@@ -625,15 +628,20 @@ def log_detection_event(
 # --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    _port = int(os.getenv(
+        "OMNIWATCH_PREDICTIVE_PORT",
+        os.getenv("PREDICTIVE_API_PORT", "8007")))
     uvicorn.run(
         "predictive.main:app",
         host="0.0.0.0",
-        port=8007,
+        port=_port,
         reload=False,
     )

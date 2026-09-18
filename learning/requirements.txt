@@ -4,6 +4,9 @@
 #
 # Runtime dependencies for the Learning Service FastAPI service.
 # Version pins match orchestration/predictive requirements.txt.
+# SKLEARN SPLIT (DYN-python): this service pins NO numpy/scikit-learn of its
+# own — it must not pull either the causal (numpy==1.23.5/sklearn<1.2) or the
+# predictive (numpy>=1.26/sklearn>=1.5) set. Never install both sets here.
 # =============================================================================
 
 # -- API framework -------------------------------------------------------------

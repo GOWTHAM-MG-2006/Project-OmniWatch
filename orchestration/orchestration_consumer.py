@@ -97,13 +97,14 @@ class OrchestrationConsumer:
 
     @property
     def topic(self) -> str:
-        """Return the consumed topic name."""
-        return TOPIC_INCIDENTS_CREATED
+        """Return the consumed topic name (settings registry wins)."""
+        return getattr(
+            self._settings, "kafka_topic_created", None) or TOPIC_INCIDENTS_CREATED
 
     def start(self) -> None:
         """Start the Kafka consumer and begin polling in a background thread."""
         self._consumer = KafkaConsumer(
-            topics=[TOPIC_INCIDENTS_CREATED],
+            topics=[self.topic],
             group_id=self._group_id,
             bootstrap_servers=self._bootstrap_servers,
             auto_offset_reset=self._auto_offset_reset,
@@ -120,7 +121,7 @@ class OrchestrationConsumer:
         _LOG.info(
             "orchestration consumer started: group=%s topic=%s",
             self._group_id,
-            TOPIC_INCIDENTS_CREATED,
+            self.topic,
         )
 
     def close(self, timeout: float = 5.0) -> None:

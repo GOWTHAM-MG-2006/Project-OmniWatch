@@ -12,20 +12,25 @@ Outputs: Calibrated anomaly probability in [0.0, 1.0] (predict)
 from __future__ import annotations
 
 import math
+import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sklearn.linear_model import LogisticRegression
 
 
-# ─── Constants ────────────────────────────────────────────────────────────── #
+# ─── Constants (env-overridable; defaults preserve today's behavior) ─────── #
 
 # Minimum samples required before a Platt calibration is attempted.  Below
 # this (or when the labels collapse to a single class) the engine falls back
 # to a weighted mean of the raw detector scores.
-_MIN_FIT_SAMPLES = 2
+_MIN_FIT_SAMPLES = int(os.getenv(
+    "OMNIWATCH_PREDICTIVE_MIN_FIT_SAMPLES",
+    os.getenv("PREDICTIVE_MIN_FIT_SAMPLES", "2")))
 
 #: Cold-start window for confidence scaling (see ColdStartAwareFusion).
-_COLD_START_WINDOW = 100
+_COLD_START_WINDOW = int(os.getenv(
+    "OMNIWATCH_COLD_START_WINDOW",
+    os.getenv("PREDICTIVE_COLD_START_WINDOW", "100")))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────── #

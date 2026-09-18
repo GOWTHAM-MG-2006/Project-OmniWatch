@@ -94,8 +94,9 @@ class OrchestrationProducer:
 
     @property
     def topic(self) -> str:
-        """Return the produced topic name."""
-        return TOPIC_REMEDIATION_ACTIONS
+        """Return the produced topic name (settings registry wins)."""
+        return getattr(
+            self._settings, "kafka_topic_actions", None) or TOPIC_REMEDIATION_ACTIONS
 
     def start(self) -> None:
         """Initialize the Kafka producer."""
@@ -107,7 +108,7 @@ class OrchestrationProducer:
         _LOG.info(
             "orchestration producer started: client=%s topic=%s",
             self._client_id,
-            TOPIC_REMEDIATION_ACTIONS,
+            self.topic,
         )
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -178,7 +179,7 @@ class OrchestrationProducer:
 
             try:
                 self._producer.send(
-                    TOPIC_REMEDIATION_ACTIONS,
+                    self.topic,
                     data,
                     key=msg_key,
                     callback=_on_delivery,
@@ -190,7 +191,7 @@ class OrchestrationProducer:
                     _LOG.debug(
                         "published action_result: action_id=%s topic=%s",
                         data.get("action_id"),
-                        TOPIC_REMEDIATION_ACTIONS,
+                        self.topic,
                     )
                     return True
 

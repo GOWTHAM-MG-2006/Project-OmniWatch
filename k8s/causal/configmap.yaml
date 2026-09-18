@@ -13,6 +13,16 @@ data:
   KAFKA_AUTO_OFFSET_RESET: earliest
   CAUSAL_MAX_DEPTH: "10"
   CAUSAL_MIN_CONFIDENCE: "0.3"
+  # DYN-python passthrough: OMNIWATCH_* primary names mirror the bare names
+  # above (same values; app prefers OMNIWATCH_* with bare fallback).
+  OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  OMNIWATCH_KAFKA_TOPICS_ANOMALIES: omniwatch.anomalies.detected
+  OMNIWATCH_KAFKA_TOPICS_CAUSAL: omniwatch.incidents.causal
+  OMNIWATCH_CAUSAL_MAX_DEPTH: "10"
+  OMNIWATCH_CAUSAL_MIN_CONFIDENCE: "0.3"
+  OMNIWATCH_CAUSAL_PORT: "8008"
+  OMNIWATCH_DEFAULT_CLOUD_PROVIDER: unknown
+  OMNIWATCH_DEFAULT_REGION: unknown
   # IND-7 leader election (K8s Lease singleton). Disabled by default:
   # replicas run standalone exactly as before. Set ENABLED to "true"
   # (and grant k8s/causal/rbac.yaml) for 1-leader/N-replica mode.

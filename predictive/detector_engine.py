@@ -356,8 +356,11 @@ class DetectorEngine:
         if consumer is None:
             from kafka import KafkaConsumer as _KafkaConsumer
 
+            features_topic = os.getenv(
+                "OMNIWATCH_KAFKA_TOPICS_FEATURES",
+                os.getenv("KAFKA_TOPIC_FEATURES", "omniwatch.features.windowed"))
             consumer = _KafkaConsumer(
-                "omniwatch.features.windowed",  # Phase 4 output topic
+                features_topic,  # Phase 4 output topic (registry-mapped)
                 bootstrap_servers=self._settings.kafka_bootstrap_servers,
                 group_id=getattr(
                     self._settings, "kafka_group_id", "omniwatch-detector-group"

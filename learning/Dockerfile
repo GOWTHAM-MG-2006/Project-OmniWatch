@@ -6,6 +6,8 @@
 # ---------------------------------------------------------------------------
 
 # == Stage 1: builder — install Python dependencies ==========================
+# SKLEARN SPLIT: no numpy/scikit-learn pinned here by design (see
+# requirements.txt) — never mix the causal and predictive ML sets.
 FROM python:3.11-slim AS builder
 
 WORKDIR /build

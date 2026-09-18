@@ -31,10 +31,29 @@ from storage.common import StorageError, create_logger
 _LOG: logging.Logger = create_logger("omniwatch.prioritization.incident_factory")
 
 # Assignment rule: P1 + confidence ≥ 0.85 (0..1 scale = 85.0 on 0..100) → auto-remediation
-_AUTO_REMEDIATION_SEVERITY = "P1"
-_AUTO_REMEDIATION_CONFIDENCE_THRESHOLD = 85.0  # 0..100 scale
-_FALLBACK_ASSIGNEE = "oncall-engineer"
-_MINIO_INCIDENTS_BUCKET = "omniwatch-incidents"
+def _env_str(primary: str, fallback: str, default: str) -> str:
+    import os as _os
+
+    return _os.getenv(primary, _os.getenv(fallback, default))
+
+
+def _env_float(primary: str, fallback: str, default: float) -> float:
+    import os as _os
+
+    return float(_os.getenv(primary, _os.getenv(fallback, str(default))))
+
+
+_AUTO_REMEDIATION_SEVERITY = _env_str(
+    "OMNIWATCH_AUTO_REMEDIATION_SEVERITY",
+    "AUTO_REMEDIATION_SEVERITY", "P1")
+_AUTO_REMEDIATION_CONFIDENCE_THRESHOLD = _env_float(
+    "OMNIWATCH_AUTO_REMEDIATION_CONFIDENCE_THRESHOLD",
+    "AUTO_REMEDIATION_CONFIDENCE_THRESHOLD", 85.0)  # 0..100 scale
+_FALLBACK_ASSIGNEE = _env_str(
+    "OMNIWATCH_FALLBACK_ASSIGNEE", "FALLBACK_ASSIGNEE", "oncall-engineer")
+_MINIO_INCIDENTS_BUCKET = _env_str(
+    "OMNIWATCH_MINIO_BUCKETS_INCIDENTS", "MINIO_INCIDENTS_BUCKET",
+    "omniwatch-incidents")
 
 
 class IncidentFactory:
@@ -71,7 +90,9 @@ class IncidentFactory:
         self._settings = settings or Settings.from_env()
         self._incidents_bucket = getattr(
             self._settings, "minio_incidents_bucket", None
-        ) or os.environ.get("MINIO_INCIDENTS_BUCKET", _MINIO_INCIDENTS_BUCKET)
+        ) or _env_str(
+            "OMNIWATCH_MINIO_BUCKETS_INCIDENTS", "MINIO_INCIDENTS_BUCKET",
+            _MINIO_INCIDENTS_BUCKET)
         self._persist_fn = persist_fn
 
     def build(self, root_cause: RootCauseObject | dict[str, Any]) -> IncidentRecord:

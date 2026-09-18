@@ -60,9 +60,20 @@ from storage.neo4j.client import Neo4jClient
 # Constants
 # ---------------------------------------------------------------------------
 
-TOPIC = "omniwatch.entities.resolved"
-GROUP_ID = "neo4j-topology-loader"
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+def _topic_env(primary: str, fallback: str, default: str) -> str:
+    """Kafka topic / group with OMNIWATCH_* primary + old bare-name fallback."""
+    return os.getenv(primary, os.getenv(fallback, default))
+
+
+TOPIC = _topic_env(
+    "OMNIWATCH_KAFKA_TOPICS_ENTITIES", "KAFKA_TOPIC_ENTITIES",
+    "omniwatch.entities.resolved")
+GROUP_ID = _topic_env(
+    "OMNIWATCH_KAFKA_GROUP_ENTITIES", "KAFKA_GROUP_ENTITIES",
+    "neo4j-topology-loader")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS",
+    os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
 
 # Poll timeout per consumer.poll() call — keeps the loop responsive and
 # prevents infinite hangs when Kafka is down.

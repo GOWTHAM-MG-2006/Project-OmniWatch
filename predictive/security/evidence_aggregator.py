@@ -9,11 +9,14 @@ Outputs: List of up to 5 evidence log snippets per (entity_id, attack_type)
 
 from __future__ import annotations
 
+import os
 from collections import deque
 from typing import Any, Dict, List, Tuple
 
 # Maximum number of evidence log lines retained per (entity, attack) key.
-EVIDENCE_BUFFER_MAX = 5
+EVIDENCE_BUFFER_MAX = int(os.getenv(
+    "OMNIWATCH_SECURITY_EVIDENCE_BUFFER_MAX",
+    os.getenv("SECURITY_EVIDENCE_BUFFER_MAX", "5")))
 
 
 class EvidenceAggregator:

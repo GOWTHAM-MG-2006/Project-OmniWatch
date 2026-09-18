@@ -26,8 +26,18 @@ _SEVERITY_RISK: dict[str, str] = {
 }
 
 # When business impact is very high, elevate risk regardless of severity
-_HIGH_IMPACT_THRESHOLD: float = 80.0
-_MEDIUM_IMPACT_THRESHOLD: float = 50.0
+def _threshold_env(primary: str, fallback: str, default: float) -> float:
+    import os as _os
+
+    return float(_os.getenv(primary, _os.getenv(fallback, str(default))))
+
+
+_HIGH_IMPACT_THRESHOLD: float = _threshold_env(
+    "OMNIWATCH_SLA_HIGH_IMPACT_THRESHOLD",
+    "SLA_HIGH_IMPACT_THRESHOLD", 80.0)
+_MEDIUM_IMPACT_THRESHOLD: float = _threshold_env(
+    "OMNIWATCH_SLA_MEDIUM_IMPACT_THRESHOLD",
+    "SLA_MEDIUM_IMPACT_THRESHOLD", 50.0)
 
 
 class SlaRiskCalculator:

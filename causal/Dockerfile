@@ -7,6 +7,8 @@
 # == Stage 1: builder — install Python dependencies ==========================
 # PyRCA (sfr-pyrca 1.0.1) requires scikit-learn < 1.2 which ships no cp314
 # wheels, so the image must be python:3.10-slim (NOT 3.14 like predictive).
+# SKLEARN SPLIT: numpy==1.23.5 + scikit-learn<1.2 here; predictive uses
+# numpy>=1.26 + scikit-learn>=1.5. Never mix the two requirement sets.
 FROM python:3.10-slim AS builder
 
 WORKDIR /build

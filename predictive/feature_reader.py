@@ -112,9 +112,10 @@ class FeatureReader:
         """
         try:
             client = self._get_ch_client()
+            db = self._settings.clickhouse_db
             rows = client._with_retry(
                 lambda: client.get_client().query(
-                    "SELECT DISTINCT entity_id FROM omniwatch.feature_vectors"
+                    f"SELECT DISTINCT entity_id FROM {db}.feature_vectors"
                 ).result_rows
             )
             return [str(row[0]) for row in rows if row and row[0]]
@@ -137,7 +138,7 @@ class FeatureReader:
         if self._ch_client is None:
             cfg = StorageConfig(
                 clickhouse_host=self._settings.clickhouse_host,
-                clickhouse_port=self._settings.clickhouse_port,
+                clickhouse_http_port=self._settings.clickhouse_port,
                 clickhouse_db=self._settings.clickhouse_db,
                 clickhouse_user=self._settings.clickhouse_user,
                 clickhouse_password=self._settings.clickhouse_password,

@@ -9,17 +9,33 @@ Outputs: Suppression decision (bool)
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Dict, Tuple
 
+
+def _env_int(primary: str, fallback: str, default: int) -> int:
+    return int(os.getenv(primary, os.getenv(fallback, str(default))))
+
+
+def _env_float(primary: str, fallback: str, default: float) -> float:
+    return float(os.getenv(primary, os.getenv(fallback, str(default))))
+
+
 # A spike is considered transient if it lasts less than this duration.
-SPIKE_DURATION_THRESHOLD_SECONDS = 180  # 3 minutes
+SPIKE_DURATION_THRESHOLD_SECONDS = _env_int(
+    "OMNIWATCH_PREDICTIVE_SPIKE_DURATION_SECONDS",
+    "PREDICTIVE_SPIKE_DURATION_SECONDS", 180)  # 3 minutes
 
 # A cascade is declared when this many neighbors are affected.
-CASCADE_NEIGHBOR_THRESHOLD = 3
+CASCADE_NEIGHBOR_THRESHOLD = _env_int(
+    "OMNIWATCH_PREDICTIVE_CASCADE_NEIGHBOR_THRESHOLD",
+    "PREDICTIVE_CASCADE_NEIGHBOR_THRESHOLD", 3)
 
 # Anomalies at or above this score are never suppressed.
-CRITICAL_SCORE_THRESHOLD = 0.85
+CRITICAL_SCORE_THRESHOLD = _env_float(
+    "OMNIWATCH_PREDICTIVE_CRITICAL_SCORE_THRESHOLD",
+    "PREDICTIVE_CRITICAL_SCORE_THRESHOLD", 0.85)
 
 
 class NoiseFilter:

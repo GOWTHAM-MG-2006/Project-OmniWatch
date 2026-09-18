@@ -20,25 +20,60 @@ from genai.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-_KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+_KAFKA_BOOTSTRAP = os.getenv(
+    "OMNIWATCH_KAFKA_BOOTSTRAP_SERVERS",
+    os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
 
-_TOPIC_MAP: dict[str, str] = {
-    "summary": "omniwatch.generated.summaries",
-    "runbook": "omniwatch.generated.runbooks",
-    "report": "omniwatch.generated.reports",
-    "postmortem": "omniwatch.generated.reports",
-}
+
+def _topic_map_from_env() -> dict[str, str]:
+    def _t(primary: str, fallback: str, default: str) -> str:
+        return os.getenv(primary, os.getenv(fallback, default))
+
+    return {
+        "summary": _t("OMNIWATCH_KAFKA_TOPICS_SUMMARIES", "KAFKA_TOPIC_SUMMARIES",
+                       "omniwatch.generated.summaries"),
+        "runbook": _t("OMNIWATCH_KAFKA_TOPICS_RUNBOOKS", "KAFKA_TOPIC_RUNBOOKS",
+                       "omniwatch.generated.runbooks"),
+        "report": _t("OMNIWATCH_KAFKA_TOPICS_REPORTS", "KAFKA_TOPIC_REPORTS",
+                      "omniwatch.generated.reports"),
+        "postmortem": _t("OMNIWATCH_KAFKA_TOPICS_REPORTS", "KAFKA_TOPIC_REPORTS",
+                          "omniwatch.generated.reports"),
+    }
+
+
+_TOPIC_MAP: dict[str, str] = _topic_map_from_env()
 
 
 class GenAIProducer:
     """Kafka producer for generated artifacts."""
 
-    def __init__(self) -> None:
-        settings = Settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        settings = settings or Settings()
+        self._settings = settings
         self._producer = Producer({
             "bootstrap.servers": settings.kafka_bootstrap,
         })
         self._stats: dict[str, int] = {"produced": 0, "errors": 0}
+
+    def _topic_for(self, artifact_type: str) -> str:
+        """Resolve the topic for an artifact type (settings registry wins)."""
+        settings_map = {
+            "summary": getattr(
+                self._settings, "kafka_topic_summaries", None),
+            "runbook": getattr(
+                self._settings, "kafka_topic_runbooks", None),
+            "report": getattr(
+                self._settings, "kafka_topic_reports", None),
+            "postmortem": getattr(
+                self._settings, "kafka_topic_reports", None),
+        }
+        configured = settings_map.get(artifact_type)
+        if configured:
+            return str(configured)
+        return _TOPIC_MAP.get(
+            artifact_type,
+            _topic_map_from_env().get("report",
+                                      "omniwatch.generated.reports"))
 
     def produce(
         self,
@@ -51,7 +86,7 @@ class GenAIProducer:
             artifact: The generated artifact to publish.
             key: Optional Kafka message key (defaults to incident_id).
         """
-        topic = _TOPIC_MAP.get(artifact.artifact_type, "omniwatch.generated.reports")
+        topic = self._topic_for(artifact.artifact_type)
         msg_key = (key or artifact.incident_id).encode("utf-8")
         value = artifact.model_dump_json().encode("utf-8")
 
