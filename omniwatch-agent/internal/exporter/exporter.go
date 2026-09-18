@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agenttls "github.com/omniwatch/omniwatch-agent/internal/tls"
+	"github.com/omniwatch/omniwatch-agent/internal/resilience"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -50,6 +51,8 @@ type Exporter struct {
 	mp       *sdkmetric.MeterProvider
 	lp       *sdklog.LoggerProvider
 	tlsCreds *agenttls.TLSCredentials
+	breaker  *resilience.CircuitBreaker
+	retry    *resilience.RetryPolicy
 }
 
 // New initializes the OTel SDK with OTLP gRPC exporters for traces, metrics
@@ -128,7 +131,54 @@ func New(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.O
 	)
 	global.SetLoggerProvider(lp)
 
-	return &Exporter{endpoint: endpoint, tp: tp, mp: mp, lp: lp, tlsCreds: tlsCreds}, nil
+	retry := resilience.DefaultRetryPolicy()
+	return &Exporter{
+		endpoint: endpoint,
+		tp:       tp,
+		mp:       mp,
+		lp:       lp,
+		tlsCreds: tlsCreds,
+		breaker:  resilience.NewCircuitBreaker(resilience.BreakerSettings{Name: "otlp-export"}),
+		retry:    &retry,
+	}, nil
+}
+
+// ConfigureResilience swaps the breaker/retry guards (the collector wires
+// config values here). Nil arguments are ignored. The New signature is
+// unaffected: every exporter starts with production defaults.
+func (e *Exporter) ConfigureResilience(b *resilience.CircuitBreaker, r *resilience.RetryPolicy) {
+	if b != nil {
+		e.breaker = b
+	}
+	if r != nil {
+		e.retry = r
+	}
+}
+
+// ForceFlush pushes all providers (traces, metrics, logs) to the OTLP
+// endpoint; the first flush error wins. Against a dead endpoint this is the
+// call that fails and feeds the breaker.
+func (e *Exporter) ForceFlush(ctx context.Context) error {
+	if err := e.tp.ForceFlush(ctx); err != nil {
+		return fmt.Errorf("exporter: trace flush: %w", err)
+	}
+	if err := e.mp.ForceFlush(ctx); err != nil {
+		return fmt.Errorf("exporter: metric flush: %w", err)
+	}
+	if err := e.lp.ForceFlush(ctx); err != nil {
+		return fmt.Errorf("exporter: log flush: %w", err)
+	}
+	return nil
+}
+
+// ExportWithResilience emits via emit, then flushes, guarded by retry first
+// and the circuit breaker around the whole retried call. When the breaker is
+// open this fails fast without touching the endpoint.
+func (e *Exporter) ExportWithResilience(ctx context.Context, emit func(context.Context)) error {
+	return resilience.Guarded(ctx, e.breaker, e.retry, func(ctx context.Context) error {
+		emit(ctx)
+		return e.ForceFlush(ctx)
+	})
 }
 
 // newResource builds the resource with the required attributes:

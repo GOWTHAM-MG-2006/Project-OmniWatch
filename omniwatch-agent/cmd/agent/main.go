@@ -23,6 +23,7 @@ import (
 	"github.com/omniwatch/omniwatch-agent/internal/exporter"
 	"github.com/omniwatch/omniwatch-agent/internal/health"
 	agenttls "github.com/omniwatch/omniwatch-agent/internal/tls"
+	"github.com/omniwatch/omniwatch-agent/internal/auth"
 )
 
 const (
@@ -95,7 +96,7 @@ func run() int {
 
 	httpSrv := &http.Server{
 		Addr:         healthAddr,
-		Handler:      healthSrv.Handler(),
+		Handler:      healthHandler(cfg, logger, healthSrv),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
@@ -144,6 +145,17 @@ func run() int {
 	healthSrv.SetCollectorStatus(health.CollectorStopped)
 	logger.Info("shutdown complete")
 	return 0
+}
+
+// healthHandler wraps the health mux with the IND-3 auth chain
+// (mTLS -> API key -> dev bypass) built from cfg.Auth.
+func healthHandler(cfg *config.Config, logger *slog.Logger, srv *health.Server) http.Handler {
+	a, err := auth.NewForMode(cfg.Auth.Mode, cfg.Auth.APIKeys, cfg.Auth.TrustedCAFile)
+	if err != nil {
+		logger.Warn("health auth mode fallback", "error", err, "mode", cfg.Auth.Mode)
+	}
+	logger.Info("health auth configured", "mode", a.Mode())
+	return srv.HandlerWithAuth(a)
 }
 
 // loadConfig resolves the config path (--config flag > AGENT_CONFIG env >

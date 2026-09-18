@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+
+	"github.com/omniwatch/omniwatch-agent/internal/auth"
 )
 
 // Collector statuses tracked by the health server.
@@ -82,6 +84,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
 	return mux
+}
+
+// HandlerWithAuth wraps Handler with the auth chain (mTLS -> API key ->
+// dev bypass). A nil authenticator leaves the mux unwrapped.
+func (s *Server) HandlerWithAuth(a auth.Authenticator) http.Handler {
+	h := s.Handler()
+	if a == nil {
+		return h
+	}
+	return auth.Middleware(a)(h)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v statusPayload) {

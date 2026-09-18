@@ -57,3 +57,17 @@ tls:
   cert_rotation_interval: 24h
   spiffe_socket_path: "unix:///tmp/spire-agent/public/api.sock"
   trust_domain: "example.org"
+auth:
+  mode: dev
+  trusted_ca_file: ""
+  # API keys are ENV-only (OMNIWATCH_AUTH_API_KEYS comma-list), never stored here.
+resilience:
+  circuit_breaker_threshold: 5
+  circuit_breaker_timeout: 30s
+  queue_size: 1000
+  retry_max_attempts: 3
+  retry_base_delay: 100ms
+  retry_backoffs:
+    - 100ms
+    - 500ms
+    - 2s

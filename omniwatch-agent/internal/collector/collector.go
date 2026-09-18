@@ -29,6 +29,7 @@ import (
 
 	"github.com/omniwatch/omniwatch-agent/internal/config"
 	"github.com/omniwatch/omniwatch-agent/internal/exporter"
+	"github.com/omniwatch/omniwatch-agent/internal/resilience"
 )
 
 // instrumentationScope identifies telemetry produced by this collector.
@@ -55,6 +56,12 @@ type Collector struct {
 	tracer     trace.Tracer
 	counter    metric.Int64Counter
 	otelLogger log.Logger
+
+	// queue bounds pending heartbeat emissions: a dead OTLP endpoint cannot
+	// grow memory unboundedly. Full queue drops oldest + counts
+	// omniwatch.agent.queue_dropped; notifyCh wakes the drain worker.
+	queue    *resilience.BoundedQueue[struct{}]
+	notifyCh chan struct{}
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -95,7 +102,78 @@ func New(cfg *config.Config, exp *exporter.Exporter, logger *slog.Logger) *Colle
 		logger.Warn("heartbeat counter init failed, heartbeats will skip metrics", "error", err)
 	}
 	c.counter = counter
+
+	// Wire IND-2 resilience from config: breaker + retry guard the OTLP
+	// export path, the bounded queue caps pending heartbeat emissions.
+	rc := cfg.Resilience
+	rc.WithDefaults()
+	breaker := resilience.NewCircuitBreaker(resilience.BreakerSettings{
+		Name:              "otlp-export",
+		FailureThreshold:  rc.CircuitBreakerThreshold,
+		OpenTimeout:       rc.CircuitBreakerTimeout,
+		MaxHalfOpenProbes: 1,
+	})
+	retry := resilience.RetryPolicy{
+		MaxAttempts:    rc.RetryMaxAttempts,
+		BaseDelay:      resilience.DefaultRetryBaseDelay,
+		MaxDelay:       resilience.DefaultRetryMaxDelay,
+		JitterFraction: resilience.DefaultRetryJitterFraction,
+	}
+	if len(rc.RetryBackoffs) > 0 {
+		retry.BaseDelay = rc.RetryBackoffs[0]
+		retry.MaxDelay = rc.RetryBackoffs[len(rc.RetryBackoffs)-1]
+	}
+	if rc.RetryBaseDelay > 0 {
+		retry.BaseDelay = rc.RetryBaseDelay
+	}
+	exp.ConfigureResilience(breaker, &retry)
+
+	dropCounter, err := exp.Meter(instrumentationScope).Int64Counter(
+		resilience.QueueDroppedMetric,
+		metric.WithDescription("Heartbeat emissions dropped from a full bounded queue."),
+	)
+	if err != nil {
+		logger.Warn("queue drop counter init failed, drops will be counted locally only", "error", err)
+	}
+	c.queue = resilience.NewBoundedQueue[struct{}](rc.QueueSize, logger, dropCounter)
+	c.notifyCh = make(chan struct{}, 1)
 	return c
+}
+
+// QueueLen returns pending heartbeat emissions (for tests/observability).
+func (c *Collector) QueueLen() int { return c.queue.Len() }
+
+// QueueDropped returns the running drop-oldest total (for tests/observability).
+func (c *Collector) QueueDropped() int64 { return c.queue.Dropped() }
+
+// scheduleHeartbeat enqueues one emission without blocking; on a full queue
+// the oldest pending emission is dropped (counted + logged by the queue).
+func (c *Collector) scheduleHeartbeat() {
+	c.queue.TryEnqueue(struct{}{})
+	select {
+	case c.notifyCh <- struct{}{}:
+	default: // worker already awake; it drains everything queued
+	}
+}
+
+// drain emits every queued heartbeat through the guarded export path
+// (retry-inside-breaker + flush). It abandons the backlog on shutdown.
+func (c *Collector) drain() {
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		default:
+		}
+		if _, ok := c.queue.Dequeue(); !ok {
+			return
+		}
+		emitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := c.exp.ExportWithResilience(emitCtx, c.emitHeartbeat); err != nil {
+			c.logger.Warn("heartbeat export failed (guarded)", "error", err)
+		}
+		cancel()
+	}
 }
 
 // Pipeline returns the configured receivers → processors → exporters wiring.
@@ -119,9 +197,22 @@ func (c *Collector) Start(ctx context.Context) error {
 		"k8s_cluster_interval", c.cfg.Receiver.K8sCluster.CollectionInterval.String(),
 	)
 
-	emitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	c.emitHeartbeat(emitCtx)
-	cancel()
+	// Drain worker: serializes guarded emissions so a slow/dead endpoint
+	// backs up into the bounded queue instead of piling up goroutines.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			select {
+			case <-c.stopCh:
+				return
+			case <-c.notifyCh:
+				c.drain()
+			}
+		}
+	}()
+
+	c.scheduleHeartbeat() // immediate emission so telemetry is visible at boot
 
 	interval := c.cfg.Agent.CollectionInterval
 	if interval <= 0 {
@@ -137,9 +228,7 @@ func (c *Collector) Start(ctx context.Context) error {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				emitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				c.emitHeartbeat(emitCtx)
-				cancel()
+				c.scheduleHeartbeat()
 			}
 		}
 	}()
