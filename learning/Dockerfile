@@ -27,8 +27,9 @@ COPY --from=builder /install /usr/local
 # -- Application working directory --
 WORKDIR /app
 
-# -- Copy service code --
+# -- Copy service code + shared common lib (IND-7 leader election) --
 COPY learning/ ./learning/
+COPY common/ ./common/
 
 # -- Ensure learning package is on Python path --
 ENV PYTHONPATH=/app

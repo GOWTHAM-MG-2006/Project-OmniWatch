@@ -111,6 +111,10 @@ environment or `.env` file at repo root.
 | `KAFKA_AUTO_OFFSET_RESET` | `earliest` | Offset reset policy |
 | `CAUSAL_MAX_DEPTH` | `10` | Max fault-path traversal depth |
 | `CAUSAL_MIN_CONFIDENCE` | `0.3` | Minimum causal confidence gate |
+| `OMNIWATCH_LEADER_ELECTION_ENABLED` | `false` | Singleton gate: only the Lease leader consumes (IND-7) |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_NAME` | `omniwatch-causal-leader` | K8s Lease name |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_NAMESPACE` | `omniwatch` | K8s Lease namespace |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_DURATION` | `15` | Lease hold seconds (failover bound) |
 
 Algorithm parameters (lag window, partial correlation, canonical id template,
 provider defaults) live in `causal/config/causal_rules.yaml`.

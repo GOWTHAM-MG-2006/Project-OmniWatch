@@ -24,6 +24,10 @@ tqdm
 wheel
 packaging
 
+# --- Leader election (IND-7, optional at runtime) ---------------------------
+kubernetes>=28.0.0            # K8s Lease leader election (common/leaderelection.py);
+                              # missing client falls back to standalone mode
+
 # --- Service runtime ---------------------------------------------------------
 fastapi
 uvicorn

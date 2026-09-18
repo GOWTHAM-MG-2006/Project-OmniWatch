@@ -19,3 +19,7 @@ neo4j>=5.17.0                       # Neo4j Bolt driver (pattern_mining.py)
 
 # -- Configuration / validation ------------------------------------------------
 pydantic>=2.5.0                     # Data validation
+
+# -- Kubernetes ----------------------------------------------------------------
+kubernetes>=28.0.0                  # K8s Lease leader election (common/leaderelection.py);
+                                    # optional at runtime — missing client falls back to standalone

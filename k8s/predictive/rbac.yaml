@@ -1,0 +1,47 @@
+# OmniWatch — Phase 6 Predictive Intelligence
+# Component: leader-election RBAC (IND-7)
+# Minimal namespaced permissions for the K8s Lease singleton gate in
+# predictive/main.py (common/leaderelection.py K8sLeaseBackend).
+# Scope: coordination.k8s.io leases in namespace omniwatch ONLY.
+# No ClusterRole touched, no existing role broadened.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: predictive
+  namespace: omniwatch
+  labels:
+    app: predictive
+    tier: backend
+    phase: "6"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: predictive-leader-election
+  namespace: omniwatch
+  labels:
+    app: predictive
+    tier: backend
+    phase: "6"
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: predictive-leader-election
+  namespace: omniwatch
+  labels:
+    app: predictive
+    tier: backend
+    phase: "6"
+subjects:
+  - kind: ServiceAccount
+    name: predictive
+    namespace: omniwatch
+roleRef:
+  kind: Role
+  name: predictive-leader-election
+  apiGroup: rbac.authorization.k8s.io

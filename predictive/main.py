@@ -168,18 +168,55 @@ def _detection_worker(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan — starts the detection daemon on bootstrap."""
+    """FastAPI lifespan — starts the detection daemon on bootstrap.
+
+    IND-7: the detection loop runs behind a leader-election gate — only the
+    elected leader polls ClickHouse / publishes anomalies. Followers idle and
+    log; /health keeps serving on every replica. Disabled (default) =>
+    standalone elector => runs exactly as before.
+    """
+    from common.leaderelection import build_elector, run_leader_gated
+
     logger.info("Starting OmniWatch Predictive Intelligence Layer")
+    elector = build_elector("predictive")
+    elector.start()
     _stop_event.clear()
-    _detection_thread = threading.Thread(
-        target=_detection_worker,
-        name="omniwatch-detection-loop",
+    _gate_stop = threading.Event()
+    _term: dict[str, threading.Event] = {}
+
+    def _run_detection() -> None:
+        term_stop = threading.Event()
+        _term["stop"] = term_stop
+        _detection_worker(
+            engine=None,
+            feature_reader=None,
+            poll_interval=5.0,
+            stop_event=term_stop,
+        )
+
+    def _halt_detection() -> None:
+        term_stop = _term.pop("stop", None)
+        if term_stop is not None:
+            term_stop.set()
+
+    _gate_thread = threading.Thread(
+        target=run_leader_gated,
+        kwargs={
+            "elector": elector,
+            "run_fn": _run_detection,
+            "stop_fn": _halt_detection,
+            "stop_event": _gate_stop,
+        },
+        name="omniwatch-detection-gate",
         daemon=True,
     )
-    _detection_thread.start()
+    _gate_thread.start()
     yield
+    _gate_stop.set()
+    _halt_detection()
+    _gate_thread.join(timeout=10.0)
+    elector.stop()
     _stop_event.set()
-    _detection_thread.join(timeout=10.0)
     logger.info("OmniWatch Predictive Intelligence Layer stopped")
 
 

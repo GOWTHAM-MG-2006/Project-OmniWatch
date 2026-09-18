@@ -31,3 +31,10 @@ data:
   PREDICTIVE_SEASONALITY_PERIOD: "24"
   PREDICTIVE_LOOKBACK_WINDOW: "168"
   PREDICTIVE_SECURITY_ENABLED: "true"
+  # IND-7 leader election (K8s Lease singleton). Disabled by default:
+  # replicas run standalone exactly as before. Set ENABLED to "true"
+  # (and grant k8s/predictive/rbac.yaml) for 1-leader/N-replica mode.
+  OMNIWATCH_LEADER_ELECTION_ENABLED: "false"
+  OMNIWATCH_LEADER_ELECTION_LEASE_NAME: omniwatch-predictive-leader
+  OMNIWATCH_LEADER_ELECTION_LEASE_NAMESPACE: omniwatch
+  OMNIWATCH_LEADER_ELECTION_LEASE_DURATION: "15"

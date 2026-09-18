@@ -1,0 +1,47 @@
+# OmniWatch — Phase 7 Causal Graph Engine
+# Component: leader-election RBAC (IND-7)
+# Minimal namespaced permissions for the K8s Lease singleton gate in
+# causal/causal_engine.py (common/leaderelection.py K8sLeaseBackend).
+# Scope: coordination.k8s.io leases in namespace omniwatch ONLY.
+# No ClusterRole touched, no existing role broadened.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: causal
+  namespace: omniwatch
+  labels:
+    app: causal
+    tier: backend
+    phase: "7"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: causal-leader-election
+  namespace: omniwatch
+  labels:
+    app: causal
+    tier: backend
+    phase: "7"
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: causal-leader-election
+  namespace: omniwatch
+  labels:
+    app: causal
+    tier: backend
+    phase: "7"
+subjects:
+  - kind: ServiceAccount
+    name: causal
+    namespace: omniwatch
+roleRef:
+  kind: Role
+  name: causal-leader-election
+  apiGroup: rbac.authorization.k8s.io

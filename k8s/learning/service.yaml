@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: learning
+  namespace: omniwatch
+  labels:
+    app: learning
+    tier: backend
+    phase: "11"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8030
+      targetPort: 8030
+      name: http
+  selector:
+    app: learning

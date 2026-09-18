@@ -57,8 +57,8 @@ LEARNING_API_PORT = int(os.environ.get("LEARNING_API_PORT", "8030"))
 _feedback_processor: FeedbackLoopProcessor | None = None
 _pattern_miner: PatternMiner | None = None
 _recommendation_engine: RecommendationEngine | None = None
-_feedback_thread: threading.Thread | None = None
-_pattern_thread: threading.Thread | None = None
+# NOTE (IND-7): worker threads are owned per leadership term inside lifespan's
+# gated runner (_run_processors); no module-level thread handles needed.
 
 
 def _get_recommendation_engine() -> RecommendationEngine:
@@ -86,82 +86,110 @@ def _get_recommendation_engine() -> RecommendationEngine:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifespan context manager: start feedback loop + pattern miner threads,
     yield for request serving, then stop both processors on shutdown.
+
+    IND-7: both processors run behind a leader-election gate — only the
+    elected leader consumes Kafka / mines patterns. Followers idle and log;
+    /health and the read-only recommendation/pattern APIs keep serving.
+    Disabled (default) => standalone elector => runs exactly as before.
     """
+    from common.leaderelection import build_elector, run_leader_gated
+
     global _feedback_processor, _pattern_miner, _recommendation_engine
-    global _feedback_thread, _pattern_thread
 
-    # --- Startup ---
-    # 1. FeedbackLoopProcessor — Kafka consumer in background thread
-    _feedback_processor = FeedbackLoopProcessor(
-        clickhouse_config={
-            "host": CLICKHOUSE_HOST,
-            "port": CLICKHOUSE_PORT,
-            "database": CLICKHOUSE_DB,
-            "username": CLICKHOUSE_USER,
-            "password": CLICKHOUSE_PASSWORD,
+    elector = build_elector("learning")
+    elector.start()
+    _gate_stop = threading.Event()
+
+    def _build_processors() -> None:
+        """(Re)create fresh processors for a new leadership term."""
+        global _feedback_processor, _pattern_miner
+        _feedback_processor = FeedbackLoopProcessor(
+            clickhouse_config={
+                "host": CLICKHOUSE_HOST,
+                "port": CLICKHOUSE_PORT,
+                "database": CLICKHOUSE_DB,
+                "username": CLICKHOUSE_USER,
+                "password": CLICKHOUSE_PASSWORD,
+            },
+            kafka_config={
+                "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
+                "group_id": KAFKA_GROUP_ID,
+                "auto_offset_reset": KAFKA_AUTO_OFFSET_RESET,
+            },
+        )
+        _pattern_miner = PatternMiner(
+            clickhouse_config={
+                "host": CLICKHOUSE_HOST,
+                "port": CLICKHOUSE_PORT,
+                "database": CLICKHOUSE_DB,
+                "username": CLICKHOUSE_USER,
+                "password": CLICKHOUSE_PASSWORD,
+            },
+            neo4j_config={
+                "uri": NEO4J_URI,
+                "user": NEO4J_USER,
+                "password": NEO4J_PASSWORD,
+            },
+        )
+
+    def _run_processors() -> None:
+        _build_processors()
+        assert _feedback_processor is not None and _pattern_miner is not None
+        feedback_thread = threading.Thread(
+            target=_feedback_processor.start,
+            kwargs={"poll_interval": 1.0},
+            daemon=True,
+            name="feedback-loop-thread",
+        )
+        pattern_thread = threading.Thread(
+            target=_pattern_miner.start,
+            kwargs={"interval": PATTERN_MINING_INTERVAL},
+            daemon=True,
+            name="pattern-miner-thread",
+        )
+        feedback_thread.start()
+        pattern_thread.start()
+        logger.info("feedback loop thread started")
+        logger.info(
+            "pattern miner thread started interval=%ds",
+            PATTERN_MINING_INTERVAL,
+        )
+        logger.info("learning service started port=%d", LEARNING_API_PORT)
+        feedback_thread.join()
+        pattern_thread.join()
+
+    def _halt_processors() -> None:
+        if _feedback_processor is not None:
+            try:
+                _feedback_processor.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("error stopping feedback processor: %s", exc)
+        if _pattern_miner is not None:
+            try:
+                _pattern_miner.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("error stopping pattern miner: %s", exc)
+
+    _gate_thread = threading.Thread(
+        target=run_leader_gated,
+        kwargs={
+            "elector": elector,
+            "run_fn": _run_processors,
+            "stop_fn": _halt_processors,
+            "stop_event": _gate_stop,
         },
-        kafka_config={
-            "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
-            "group_id": KAFKA_GROUP_ID,
-            "auto_offset_reset": KAFKA_AUTO_OFFSET_RESET,
-        },
-    )
-    _feedback_thread = threading.Thread(
-        target=_feedback_processor.start,
-        kwargs={"poll_interval": 1.0},
+        name="learning-leader-gate",
         daemon=True,
-        name="feedback-loop-thread",
     )
-    _feedback_thread.start()
-    logger.info("feedback loop thread started")
-
-    # 2. PatternMiner — scheduled mining in background thread
-    _pattern_miner = PatternMiner(
-        clickhouse_config={
-            "host": CLICKHOUSE_HOST,
-            "port": CLICKHOUSE_PORT,
-            "database": CLICKHOUSE_DB,
-            "username": CLICKHOUSE_USER,
-            "password": CLICKHOUSE_PASSWORD,
-        },
-        neo4j_config={
-            "uri": NEO4J_URI,
-            "user": NEO4J_USER,
-            "password": NEO4J_PASSWORD,
-        },
-    )
-    _pattern_thread = threading.Thread(
-        target=_pattern_miner.start,
-        kwargs={"interval": PATTERN_MINING_INTERVAL},
-        daemon=True,
-        name="pattern-miner-thread",
-    )
-    _pattern_thread.start()
-    logger.info(
-        "pattern miner thread started interval=%ds",
-        PATTERN_MINING_INTERVAL,
-    )
-
-    # 3. RecommendationEngine — lazy init, no thread needed
-
-    logger.info("learning service started port=%d", LEARNING_API_PORT)
+    _gate_thread.start()
 
     yield
 
     # --- Shutdown ---
-    if _feedback_processor is not None:
-        try:
-            _feedback_processor.stop()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("error stopping feedback processor: %s", exc)
-        _feedback_processor = None
-
-    if _pattern_miner is not None:
-        try:
-            _pattern_miner.stop()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("error stopping pattern miner: %s", exc)
-        _pattern_miner = None
+    _gate_stop.set()
+    _halt_processors()
+    _gate_thread.join(timeout=10.0)
+    elector.stop()
 
     if _recommendation_engine is not None:
         try:
@@ -169,6 +197,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:  # noqa: BLE001
             logger.error("error closing recommendation engine: %s", exc)
         _recommendation_engine = None
+
+    # NOTE: _feedback_processor / _pattern_miner globals are intentionally left
+    # assigned (stopped) so read-only /api/patterns keeps working after
+    # shutdown begins; clients are lazily re-created on next use.
 
     logger.info("learning service stopped")
 

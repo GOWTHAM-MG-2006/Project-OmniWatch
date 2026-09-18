@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: learning-config
+  namespace: omniwatch
+  labels:
+    app: learning
+    tier: backend
+    phase: "11"
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_LEARNING_GROUP_ID: omniwatch-learning-group
+  KAFKA_AUTO_OFFSET_RESET: earliest
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DB: omniwatch
+  CLICKHOUSE_USER: default
+  CLICKHOUSE_PASSWORD: ""
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_USER: neo4j
+  NEO4J_PASSWORD: omniwatch
+  LEARNING_API_PORT: "8030"
+  PATTERN_MINING_INTERVAL: "900"
+  OMNIWATCH_LEADER_ELECTION_ENABLED: "false"
+  OMNIWATCH_LEADER_ELECTION_LEASE_NAME: omniwatch-learning-leader
+  OMNIWATCH_LEADER_ELECTION_LEASE_NAMESPACE: omniwatch
+  OMNIWATCH_LEADER_ELECTION_LEASE_DURATION: "15"

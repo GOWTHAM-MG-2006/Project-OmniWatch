@@ -315,20 +315,62 @@ def set_last_incident(root_cause_entity: str) -> None:
 # --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+    import time
+
     import uvicorn
+
+    from common.leaderelection import build_elector, run_leader_gated
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     engine = CausalEngine()
-    try:
-        engine.start_consumer(run_in_thread=True)
-    except Exception as exc:  # noqa: BLE001 - keep serving health without Kafka
-        _LOG.warning("kafka consumer unavailable; serving health only: %s", exc)
-    uvicorn.run(
-        "causal.causal_engine:app",
-        host="0.0.0.0",
-        port=8008,
-        reload=False,
+    # IND-7: singleton gate — only the elected leader consumes
+    # omniwatch.anomalies.detected. Followers idle; /health keeps serving.
+    # Disabled (default) => standalone elector => runs exactly as before.
+    elector = build_elector("causal")
+    elector.start()
+    _gate_stop = threading.Event()
+
+    def _run_consumer() -> None:
+        try:
+            engine.start_consumer()
+        except Exception as exc:  # noqa: BLE001 - keep serving health without Kafka
+            _LOG.warning("kafka consumer unavailable; serving health only: %s", exc)
+            time.sleep(5.0)  # avoid hot respawn loop while Kafka is down
+
+    def _handle_signal(signum: int, _frame: Any) -> None:
+        _LOG.info("received signal %s, shutting down", signum)
+        _gate_stop.set()
+        engine.close()
+
+    import signal as _signal
+
+    _signal.signal(_signal.SIGINT, _handle_signal)
+    _signal.signal(_signal.SIGTERM, _handle_signal)
+
+    _gate_thread = threading.Thread(
+        target=run_leader_gated,
+        kwargs={
+            "elector": elector,
+            "run_fn": _run_consumer,
+            "stop_fn": engine.close,
+            "stop_event": _gate_stop,
+        },
+        name="omniwatch-causal-leader-gate",
+        daemon=True,
     )
+    _gate_thread.start()
+    try:
+        uvicorn.run(
+            "causal.causal_engine:app",
+            host="0.0.0.0",
+            port=8008,
+            reload=False,
+        )
+    finally:
+        _gate_stop.set()
+        _gate_thread.join(timeout=10.0)
+        elector.stop()
+        engine.close()

@@ -1,48 +1,46 @@
-# OmniWatch — Phase 6 Predictive Intelligence
-# Component: predictive Deployment (Merlion anomaly detection + security classifier)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: predictive
+  name: learning
   namespace: omniwatch
   labels:
-    app: predictive
+    app: learning
     tier: backend
-    phase: "6"
+    phase: "11"
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: predictive
+      app: learning
   template:
     metadata:
       labels:
-        app: predictive
+        app: learning
         tier: backend
-        phase: "6"
+        phase: "11"
     spec:
-      serviceAccountName: predictive  # IND-7: lease RBAC (k8s/predictive/rbac.yaml)
+      serviceAccountName: learning
       containers:
-        - name: omniwatch-predictive
-          image: omniwatch/predictive:latest
+        - name: omniwatch-learning
+          image: omniwatch/learning:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8007
+            - containerPort: 8030
               name: http
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: predictive-config
+                name: learning-config
           livenessProbe:
             httpGet:
               path: /health
-              port: 8007
+              port: 8030
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /health
-              port: 8007
+              port: 8030
             initialDelaySeconds: 10
             periodSeconds: 15
           resources:

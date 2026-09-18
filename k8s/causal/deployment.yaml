@@ -19,6 +19,7 @@ spec:
         tier: backend
         phase: "7"
     spec:
+      serviceAccountName: causal  # IND-7: lease RBAC (k8s/causal/rbac.yaml)
       containers:
         - name: omniwatch-causal
           image: omniwatch/causal:latest

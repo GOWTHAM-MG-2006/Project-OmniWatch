@@ -41,6 +41,10 @@ confluent-kafka>=2.3.0          # Alternative Kafka client (used by ingestion la
 clickhouse-connect>=0.7.0       # ClickHouse HTTP client (used by storage layer)
 neo4j>=5.17.0                   # Neo4j Bolt driver (signal_enricher.py via storage layer)
 
+# -- Kubernetes ---------------------------------------------------------------
+kubernetes>=28.0.0              # K8s Lease leader election (common/leaderelection.py);
+                                # optional at runtime — missing client falls back to standalone
+
 # -- API framework -------------------------------------------------------------
 fastapi>=0.109.0                # Health endpoint (predictive/main.py)
 uvicorn>=0.27.0                 # ASGI server (predictive/main.py __main__)

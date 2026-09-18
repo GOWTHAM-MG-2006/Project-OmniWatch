@@ -35,9 +35,10 @@ COPY --from=builder /install /usr/local
 # -- Application working directory --
 WORKDIR /app
 
-# -- Copy service code + shared storage package --
+# -- Copy service code + shared storage package + shared common lib (IND-7) --
 COPY causal/ ./causal/
 COPY storage/ ./storage/
+COPY common/ ./common/
 
 # -- Ensure causal package is on Python path --
 ENV PYTHONPATH=/app

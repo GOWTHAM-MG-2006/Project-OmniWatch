@@ -109,6 +109,10 @@ environment or `.env` file at repo root.
 | `PREDICTIVE_SEASONALITY_PERIOD` | `24` | Seasonality period in data-point units |
 | `PREDICTIVE_SECURITY_ENABLED` | `true` | Enable security signal classifier |
 | `K8S_NAMESPACE` | `default` | Kubernetes namespace for K8s event integration |
+| `OMNIWATCH_LEADER_ELECTION_ENABLED` | `false` | Singleton gate: only the Lease leader detects (IND-7) |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_NAME` | `omniwatch-predictive-leader` | K8s Lease name |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_NAMESPACE` | `omniwatch` | K8s Lease namespace |
+| `OMNIWATCH_LEADER_ELECTION_LEASE_DURATION` | `15` | Lease hold seconds (failover bound) |
 
 ## Service Endpoints
 
