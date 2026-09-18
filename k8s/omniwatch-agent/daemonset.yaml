@@ -56,6 +56,36 @@ spec:
         env:
         - name: OMNIWATCH_EXPORTER_OTLP_ENDPOINT
           value: "otelcol.omniwatch:4317"
+        - name: OMNIWATCH_BEYLA_OTLP_ENDPOINT
+          value: "http://otelcol.omniwatch:4317"
+        - name: OMNIWATCH_HEALTH_ADDR
+          value: ":8080"
+        - name: OMNIWATCH_AUTH_MODE
+          value: "dev"
+        - name: OMNIWATCH_TLS_TRUST_DOMAIN
+          value: "example.org"
+        - name: OMNIWATCH_AGENT_SHUTDOWN_TIMEOUT_S
+          value: "10"
+        - name: OMNIWATCH_EXPORTER_INIT_TIMEOUT_S
+          value: "10"
+        - name: OMNIWATCH_HEALTH_READ_TIMEOUT_S
+          value: "5"
+        - name: OMNIWATCH_HEALTH_WRITE_TIMEOUT_S
+          value: "5"
+        - name: OMNIWATCH_HEARTBEAT_EMIT_TIMEOUT_S
+          value: "10"
+        - name: OMNIWATCH_METRIC_EXPORT_INTERVAL_S
+          value: "10"
+        - name: OMNIWATCH_BEYLA_LOG_LEVEL
+          value: "INFO"
+        - name: OMNIWATCH_BEYLA_DISCOVERY_PORTS
+          value: "80,443,8000-8999"
+        - name: OMNIWATCH_BEYLA_EXCLUDE_NAMESPACES
+          value: "kube-system"
+        - name: OMNIWATCH_BEYLA_WAKEUP_LEN
+          value: "100"
+        - name: OMNIWATCH_ALERTING_RULES_PATH
+          value: "/etc/omniwatch/alerts/prometheusrules.yaml"
         volumeMounts:
         - name: varlog
           mountPath: /var/log
@@ -65,6 +95,9 @@ spec:
           readOnly: true
         - name: k8s-audit
           mountPath: /var/log/kubernetes/audit
+          readOnly: true
+        - name: spire-socket
+          mountPath: /tmp/spire-agent/public
           readOnly: true
         livenessProbe:
           httpGet:
@@ -116,10 +149,14 @@ spec:
       - name: beyla-config
         configMap:
           name: omniwatch-beyla-config
+      - name: spire-socket
+        hostPath:
+          path: /tmp/spire-agent/public
+          type: DirectoryOrCreate
 ---
 # Self-contained Beyla config (inline copy of
-# omniwatch-agent/configs/beyla-config.yaml, byte-identical to the T8 plan
-# block). Alternative: create it imperatively with
+# omniwatch-agent/configs/beyla-config.yaml, DYN-goagent re-synced to the full
+# file incl. discovery + otel_traces_export). Alternative: create it imperatively with
 #   kubectl create configmap omniwatch-beyla-config \
 #     --from-file=beyla-config.yaml=omniwatch-agent/configs/beyla-config.yaml
 apiVersion: v1
@@ -143,3 +180,17 @@ data:
         otlp:
           endpoint: otelcol:4317
           insecure: true
+    log_level: INFO
+    kernel_version_min: "5.10"
+    discovery:
+      instrument:
+        - k8s_namespace: "*"
+        - exe_path: "*"
+        - open_ports: 80,443,8000-8999
+      exclude_instrument:
+        - k8s_namespace: kube-system
+    ebpf:
+      wakeup_len: 100
+    otel_traces_export:
+      endpoint: http://otelcol:4317
+      protocol: grpc

@@ -22,5 +22,7 @@ FROM gcr.io/distroless/static-debian12
 USER nonroot:nonroot
 COPY --from=builder /app/omniwatch-agent /omniwatch-agent
 COPY --from=builder /app/configs/agent.yaml /etc/omniwatch/agent.yaml
+COPY --from=builder /app/configs/alerts /etc/omniwatch/alerts
 EXPOSE 8080
 ENTRYPOINT ["/omniwatch-agent"]
+CMD ["--config", "/etc/omniwatch/agent.yaml"]

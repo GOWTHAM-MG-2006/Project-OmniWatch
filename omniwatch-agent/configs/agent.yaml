@@ -1,10 +1,20 @@
 # OmniWatch agent default configuration (Task T2)
+# DYN-goagent: every value below EQUALS the compiled defaults in
+# internal/config/config.go Default(). Go defaults are the tested behavior;
+# the YAML is kept byte-equal to them so yaml-boot and compiled-default boot
+# behave identically. Override any value via OMNIWATCH_* env (see README).
 agent:
   collection_interval: 60s
   log_level: info
+  health_addr: ":8080"
+  shutdown_timeout: 10s
+  health_read_timeout: 5s
+  health_write_timeout: 5s
+  export_init_timeout: 10s
+  heartbeat_emit_timeout: 10s
 receiver:
   hostmetrics:
-    collection_interval: 15s
+    collection_interval: 60s
     scrapers:
       cpu:
       memory:
@@ -28,10 +38,10 @@ receiver:
         severity:
           parse_from: attributes.level
   k8s_objects:
-    collection_interval: 30s
-    mode: watch
+    collection_interval: 15m
+    mode: pull
     label_selector: ""
-    field_selector: "metadata.namespace=omniwatch"
+    field_selector: ""
     objects:
       - name: pods
       - name: nodes
@@ -43,20 +53,26 @@ receiver:
       - name: daemonsets
       - name: statefulsets
   k8s_cluster:
-    collection_interval: 60s
+    collection_interval: 10m
     node_conditions_to_report:
       - Ready
       - MemoryPressure
       - DiskPressure
       - PIDPressure
+      - NetworkUnavailable
 exporter:
   otlp:
     endpoint: otel-collector:4317
     insecure: true
+    metric_export_interval: 10s
 tls:
   cert_rotation_interval: 24h
   spiffe_socket_path: "unix:///tmp/spire-agent/public/api.sock"
   trust_domain: "example.org"
+  cert_file: ""
+  key_file: ""
+  ca_file: ""
+  fetch_timeout: 5s
 auth:
   mode: dev
   trusted_ca_file: ""
@@ -64,6 +80,8 @@ auth:
 resilience:
   circuit_breaker_threshold: 5
   circuit_breaker_timeout: 30s
+  breaker_interval: 30s
+  breaker_max_half_open_probes: 1
   queue_size: 1000
   retry_max_attempts: 3
   retry_base_delay: 100ms
@@ -71,3 +89,18 @@ resilience:
     - 100ms
     - 500ms
     - 2s
+  retry_max_delay: 2s
+  retry_jitter_fraction: 0.5
+alerting:
+  rules_path: configs/alerts/prometheusrules.yaml
+  scrape_interval: 30s
+  for_default: 0s
+  slo_health: 99.9
+  slo_export: 99.0
+  slo_latency_p99: 5
+beyla:
+  otlp_endpoint: ""
+  log_level: INFO
+  discovery_ports: "80,443,8000-8999"
+  exclude_namespaces: kube-system
+  wakeup_len: 100

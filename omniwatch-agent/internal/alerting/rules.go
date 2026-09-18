@@ -13,6 +13,47 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// imageRulesPath is where the Dockerfile COPYs the rules in-image.
+const imageRulesPath = "/etc/omniwatch/alerts/prometheusrules.yaml"
+
+// RulesPath returns the rule file path: OMNIWATCH_ALERTING_RULES_PATH wins,
+// otherwise the repo-relative default, otherwise the in-image path when the
+// binary runs from / (distroless container). Local runs are unaffected.
+func RulesPath() string {
+	if v := os.Getenv("OMNIWATCH_ALERTING_RULES_PATH"); v != "" {
+		return v
+	}
+	if _, err := os.Stat(DefaultRulesPath); err == nil {
+		return DefaultRulesPath
+	}
+	if _, err := os.Stat(imageRulesPath); err == nil {
+		return imageRulesPath
+	}
+	return DefaultRulesPath
+}
+
+// ApplyIntervalOverrides rewrites every group interval from
+// OMNIWATCH_ALERTING_SCRAPE_INTERVAL (Go duration, e.g. "15s") and every rule
+// For from OMNIWATCH_ALERTING_FOR_DEFAULT. Rule semantics (expr/labels) are
+// untouched; empty env means no override.
+func ApplyIntervalOverrides(f *RuleFile) {
+	interval := os.Getenv("OMNIWATCH_ALERTING_SCRAPE_INTERVAL")
+	forD := os.Getenv("OMNIWATCH_ALERTING_FOR_DEFAULT")
+	if interval == "" && forD == "" {
+		return
+	}
+	for gi := range f.Spec.Groups {
+		if interval != "" {
+			f.Spec.Groups[gi].Interval = interval
+		}
+		if forD != "" {
+			for ri := range f.Spec.Groups[gi].Rules {
+				f.Spec.Groups[gi].Rules[ri].For = forD
+			}
+		}
+	}
+}
+
 // DefaultRulesPath is the repo-relative path of the production rule file,
 // loaded by the otelcol rule processor (no Prometheus server is added).
 const DefaultRulesPath = "configs/alerts/prometheusrules.yaml"

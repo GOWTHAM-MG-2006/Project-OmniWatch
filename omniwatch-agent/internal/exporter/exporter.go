@@ -38,9 +38,10 @@ const (
 	ServiceVersion = "0.1.0"
 )
 
-// metricExportInterval controls how often the periodic reader flushes
+// defaultMetricExportInterval controls how often the periodic reader flushes
 // metrics. Kept short so self-telemetry is visible in otelcol within seconds.
-const metricExportInterval = 10 * time.Second
+// Override per-exporter via NewWithMetricInterval (OMNIWATCH_METRIC_EXPORT_INTERVAL_S).
+const defaultMetricExportInterval = 10 * time.Second
 
 // Exporter holds the initialized OTel SDK providers. All signals are
 // exported via OTLP gRPC only — there is intentionally no Prometheus
@@ -62,8 +63,17 @@ type Exporter struct {
 // Resource attributes (service.name, service.version, deployment.environment,
 // host.name, k8s.pod.name, k8s.namespace.name) are attached to every signal.
 func New(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.Options) (*Exporter, error) {
+	return NewWithMetricInterval(ctx, endpoint, insecure, tlsOpts, 0)
+}
+
+// NewWithMetricInterval is New with an explicit periodic-reader flush
+// interval. A non-positive interval keeps the 10s default.
+func NewWithMetricInterval(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.Options, metricInterval time.Duration) (*Exporter, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("exporter: OTLP endpoint is empty")
+	}
+	if metricInterval <= 0 {
+		metricInterval = defaultMetricExportInterval
 	}
 
 	res, err := newResource()
@@ -116,7 +126,7 @@ func New(ctx context.Context, endpoint string, insecure bool, tlsOpts agenttls.O
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
 			metricExp,
-			sdkmetric.WithInterval(metricExportInterval),
+			sdkmetric.WithInterval(metricInterval),
 		)),
 	)
 	otel.SetMeterProvider(mp)

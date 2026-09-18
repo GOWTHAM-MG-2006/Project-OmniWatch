@@ -1,3 +1,13 @@
+# DYN-goagent: Beyla follows the agent exporter endpoint unless overridden.
+# Env knobs (same OMNIWATCH_ style as agent.yaml; consumed by the agent at boot,
+# which logs the effective endpoint via beyla.LogEffectiveEndpoint):
+#   OMNIWATCH_BEYLA_OTLP_ENDPOINT  explicit Beyla OTLP endpoint (with scheme)
+#   OMNIWATCH_BEYLA_LOG_LEVEL  OMNIWATCH_BEYLA_DISCOVERY_PORTS ("80,443,8000-8999")
+#   OMNIWATCH_BEYLA_EXCLUDE_NAMESPACES ("kube-system,...")  OMNIWATCH_BEYLA_WAKEUP_LEN
+# The agent defaults below mirror internal/config BeylaConfig; the running
+# Beyla v3.x reads otel_traces_export (scheme REQUIRED: bare otelcol:4317 is
+# rejected with "URL must have a scheme and a host"). The legacy openTelemetry
+# block is kept for 1.x reference only.
 executable_name: ""
 openTelemetry:
   attributes:

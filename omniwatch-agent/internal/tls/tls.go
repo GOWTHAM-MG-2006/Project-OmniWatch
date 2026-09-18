@@ -47,9 +47,13 @@ type Options struct {
 	CertRotationInterval time.Duration
 	// CertFile/KeyFile/CAFile optionally pin a file-based identity used when
 	// the SPIRE agent is unreachable (dev/test). Empty means SPIRE-only.
+	// Wired from OMNIWATCH_TLS_CERT_FILE/_KEY_FILE/_CA_FILE via config.
 	CertFile string
 	KeyFile  string
 	CAFile   string
+	// FetchTimeout bounds a single Workload API attestation attempt.
+	// Non-positive keeps the 5s default (OMNIWATCH_TLS_FETCH_TIMEOUT_S).
+	FetchTimeout time.Duration
 }
 
 // DefaultOptions returns production-safe defaults: 24h rotation, standard
@@ -64,12 +68,20 @@ func DefaultOptions() Options {
 
 // SPIFFEAttestor fetches X.509 SVIDs from the SPIRE Workload API.
 type SPIFFEAttestor struct {
-	socketPath  string
-	trustDomain spiffeid.TrustDomain
+	socketPath   string
+	trustDomain  spiffeid.TrustDomain
+	fetchTimeout time.Duration
 }
 
 // NewSPIFFEAttestor validates the socket address and trust domain.
 func NewSPIFFEAttestor(socketPath, trustDomain string) (*SPIFFEAttestor, error) {
+	return NewSPIFFEAttestorWithTimeout(socketPath, trustDomain, 0)
+}
+
+// NewSPIFFEAttestorWithTimeout is NewSPIFFEAttestor with an explicit
+// per-attempt FetchSVID bound (OMNIWATCH_TLS_FETCH_TIMEOUT_S via config).
+// Non-positive keeps the 5s default.
+func NewSPIFFEAttestorWithTimeout(socketPath, trustDomain string, fetchTimeoutOverride time.Duration) (*SPIFFEAttestor, error) {
 	if socketPath == "" {
 		return nil, fmt.Errorf("tls: SPIFFE socket path is empty")
 	}
@@ -80,12 +92,19 @@ func NewSPIFFEAttestor(socketPath, trustDomain string) (*SPIFFEAttestor, error) 
 	if err != nil {
 		return nil, fmt.Errorf("tls: invalid trust domain %q: %w", trustDomain, err)
 	}
-	return &SPIFFEAttestor{socketPath: socketPath, trustDomain: td}, nil
+	if fetchTimeoutOverride <= 0 {
+		fetchTimeoutOverride = fetchTimeout
+	}
+	return &SPIFFEAttestor{socketPath: socketPath, trustDomain: td, fetchTimeout: fetchTimeoutOverride}, nil
 }
 
 // FetchSVID attests the workload and returns its first X.509 SVID.
 func (a *SPIFFEAttestor) FetchSVID(ctx context.Context) (*x509svid.SVID, error) {
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	timeout := a.fetchTimeout
+	if timeout <= 0 {
+		timeout = fetchTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	client, err := workloadapi.New(ctx, workloadapi.WithAddr(a.socketPath))
 	if err != nil {
@@ -134,6 +153,9 @@ func NewTLSCredentials(ctx context.Context, opts Options, logger *slog.Logger) (
 	}
 	if opts.CertRotationInterval <= 0 {
 		opts.CertRotationInterval = DefaultCertRotationInterval
+	}
+	if opts.FetchTimeout <= 0 {
+		opts.FetchTimeout = fetchTimeout
 	}
 	c := &TLSCredentials{opts: opts, logger: logger, stopCh: make(chan struct{})}
 

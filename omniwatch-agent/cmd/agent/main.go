@@ -2,8 +2,8 @@
 // Component: main entrypoint
 // Phase: 1
 // Purpose: Agent binary entrypoint with config, health server, and graceful shutdown
-// Inputs: Config file path (--config flag, AGENT_CONFIG env, or configs/agent.yaml)
-// Outputs: Running agent process; OTLP self-telemetry to otelcol:4317
+// Inputs: Config file path (--config flag, AGENT_CONFIG env, /etc/omniwatch/agent.yaml, or configs/agent.yaml)
+// Outputs: Running agent process; OTLP self-telemetry to the configured exporter endpoint
 package main
 
 import (
@@ -27,9 +27,15 @@ import (
 )
 
 const (
-	healthAddr        = ":8080"
-	defaultConfigPath = "configs/agent.yaml"
-	shutdownTimeout   = 10 * time.Second
+	defaultHealthAddr = ":8080"
+	// defaultConfigPath is the in-image path (Dockerfile COPYs agent.yaml
+	// there and CMD passes it explicitly). Local runs fall back to the
+	// repo-relative path when the image path is absent (see loadConfig).
+	defaultConfigPath       = "/etc/omniwatch/agent.yaml"
+	localDefaultConfigPath  = "configs/agent.yaml"
+	defaultShutdownTimeout  = 10 * time.Second
+	defaultExportTimeout    = 10 * time.Second
+	defaultHealthIOTimeout  = 5 * time.Second
 )
 
 // Config loading follows the internal/config API built by T2:
@@ -59,10 +65,13 @@ func run() int {
 		"log_level", cfg.Agent.LogLevel,
 		"collection_interval", cfg.Agent.CollectionInterval.String())
 
+	prodGuard(logger, cfg)
+
 	// Beyla/eBPF preflight (IND-6): advisory kernel + eBPF availability gate.
 	// Non-fatal by design: an unsupported host only degrades Beyla traces,
-	// the agent still runs its receivers.
-	beyla.LogCheck(logger)
+	// the agent still runs its receivers. Also logs the effective Beyla OTLP
+	// endpoint so boot logs prove Beyla follows the agent endpoint.
+	beyla.LogEffectiveEndpoint(logger, cfg.Beyla.OTLPEndpoint, cfg.Exporter.OTLP.Endpoint)
 
 	// OTel SDK initialization (T4): trace, meter and logger providers
 	// exporting via OTLP gRPC to the endpoint from config.
@@ -71,9 +80,17 @@ func run() int {
 		SpiffeSocketPath:     cfg.TLS.SpiffeSocketPath,
 		TrustDomain:          cfg.TLS.TrustDomain,
 		CertRotationInterval: cfg.TLS.CertRotationInterval,
+		CertFile:             cfg.TLS.CertFile,
+		KeyFile:              cfg.TLS.KeyFile,
+		CAFile:               cfg.TLS.CAFile,
+		FetchTimeout:         cfg.TLS.FetchTimeout,
 	}
-	expCtx, expCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	otelExp, err := exporter.New(expCtx, otlpEndpoint, cfg.Exporter.OTLP.Insecure, tlsOpts)
+	exportTimeout := cfg.Agent.ExportInitTimeout
+	if exportTimeout <= 0 {
+		exportTimeout = defaultExportTimeout
+	}
+	expCtx, expCancel := context.WithTimeout(context.Background(), exportTimeout)
+	otelExp, err := exporter.NewWithMetricInterval(expCtx, otlpEndpoint, cfg.Exporter.OTLP.Insecure, tlsOpts, cfg.Exporter.OTLP.MetricExportInterval)
 	expCancel()
 	if err != nil {
 		logger.Error("otel SDK initialization failed", "error", err)
@@ -94,11 +111,26 @@ func run() int {
 		healthSrv.SetCollectorStatus(health.CollectorRunning)
 	}
 
+	healthAddr := cfg.Agent.HealthAddr
+	if flagHealthAddr != "" {
+		healthAddr = flagHealthAddr
+	}
+	if healthAddr == "" {
+		healthAddr = defaultHealthAddr
+	}
+	readTimeout := cfg.Agent.HealthReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = defaultHealthIOTimeout
+	}
+	writeTimeout := cfg.Agent.HealthWriteTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = defaultHealthIOTimeout
+	}
 	httpSrv := &http.Server{
 		Addr:         healthAddr,
 		Handler:      healthHandler(cfg, logger, healthSrv),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -125,6 +157,10 @@ func run() int {
 		return 0
 	}
 
+	shutdownTimeout := cfg.Agent.ShutdownTimeout
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = defaultShutdownTimeout
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
@@ -152,24 +188,55 @@ func run() int {
 func healthHandler(cfg *config.Config, logger *slog.Logger, srv *health.Server) http.Handler {
 	a, err := auth.NewForMode(cfg.Auth.Mode, cfg.Auth.APIKeys, cfg.Auth.TrustedCAFile)
 	if err != nil {
-		logger.Warn("health auth mode fallback", "error", err, "mode", cfg.Auth.Mode)
+		logger.Warn("health auth: unknown mode, falling back to dev bypass (availability-safe); set OMNIWATCH_AUTH_MODE to dev|apikey|mtls",
+			"error", err, "bad_mode", cfg.Auth.Mode)
 	}
 	logger.Info("health auth configured", "mode", a.Mode())
 	return srv.HandlerWithAuth(a)
 }
 
+// prodGuard logs ERROR-level warnings when OMNIWATCH_ENV=prod runs with
+// dev/insecure defaults. Defaults are frozen (behavior freeze); this only
+// makes prod misconfiguration loud.
+func prodGuard(logger *slog.Logger, cfg *config.Config) {
+	if !strings.EqualFold(os.Getenv("OMNIWATCH_ENV"), "prod") {
+		return
+	}
+	if strings.EqualFold(cfg.TLS.TrustDomain, "example.org") {
+		logger.Error("prod guard: tls.trust_domain is still example.org; set OMNIWATCH_TLS_TRUST_DOMAIN",
+			"trust_domain", cfg.TLS.TrustDomain)
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Auth.Mode), "dev") {
+		logger.Error("prod guard: auth.mode is dev (no authentication); set OMNIWATCH_AUTH_MODE to apikey|mtls",
+			"mode", cfg.Auth.Mode)
+	}
+	if cfg.Exporter.OTLP.Insecure {
+		logger.Error("prod guard: exporter OTLP insecure is true (plaintext gRPC); set OMNIWATCH_EXPORTER_OTLP_INSECURE=false with SPIRE/file mTLS",
+			"insecure", true)
+	}
+}
+
+// flagHealthAddr holds the -health-addr flag value (flag > env > default).
+var flagHealthAddr string
+
 // loadConfig resolves the config path (--config flag > AGENT_CONFIG env >
-// configs/agent.yaml) and loads it via config.Load. A missing/unreadable file
-// falls back to defaults so the agent still starts.
+// /etc/omniwatch/agent.yaml when present > configs/agent.yaml) and loads it
+// via config.Load. A missing/unreadable file falls back to defaults so the
+// agent still starts.
 func loadConfig() (*config.Config, string) {
 	flagPath := flag.String("config", "", "path to agent config file")
+	flag.StringVar(&flagHealthAddr, "health-addr", "", "health probe listen address (default: :8080)")
 	flag.Parse()
 	path := *flagPath
 	if path == "" {
 		path = os.Getenv("AGENT_CONFIG")
 	}
 	if path == "" {
-		path = defaultConfigPath
+		if _, err := os.Stat(defaultConfigPath); err == nil {
+			path = defaultConfigPath
+		} else {
+			path = localDefaultConfigPath
+		}
 	}
 	cfg, err := config.Load(path)
 	if err != nil {

@@ -144,6 +144,37 @@ func Check() Result {
 	return r
 }
 
+// DefaultOTLPEndpoint is the Beyla OTLP target when neither an explicit
+// Beyla override nor an agent exporter endpoint is configured.
+const DefaultOTLPEndpoint = "http://otelcol:4317"
+
+// ResolveEndpoint returns the OTLP endpoint the Beyla sidecar should use:
+// an explicit Beyla override wins, otherwise the agent exporter endpoint is
+// followed with an http:// scheme added (Beyla v3 rejects bare host:port).
+func ResolveEndpoint(beylaOverride, agentEndpoint string) string {
+	if beylaOverride != "" {
+		return beylaOverride
+	}
+	if agentEndpoint == "" {
+		return DefaultOTLPEndpoint
+	}
+	if strings.HasPrefix(agentEndpoint, "http://") || strings.HasPrefix(agentEndpoint, "https://") {
+		return agentEndpoint
+	}
+	return "http://" + agentEndpoint
+}
+
+// LogEffectiveEndpoint validates the eBPF preflight and logs the resolved
+// Beyla OTLP endpoint so boot logs prove which collector Beyla follows.
+func LogEffectiveEndpoint(logger *slog.Logger, beylaOverride, agentEndpoint string) Result {
+	r := LogCheck(logger)
+	logger.Info("beyla otlp endpoint resolved",
+		"beyla_endpoint", ResolveEndpoint(beylaOverride, agentEndpoint),
+		"agent_endpoint", agentEndpoint,
+		"beyla_override", beylaOverride != "")
+	return r
+}
+
 // LogCheck runs Check and logs the outcome. It never fails: an unsupported
 // host is advisory only — the agent still runs its receivers.
 func LogCheck(logger *slog.Logger) Result {

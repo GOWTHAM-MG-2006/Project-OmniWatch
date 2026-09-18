@@ -110,14 +110,15 @@ func New(cfg *config.Config, exp *exporter.Exporter, logger *slog.Logger) *Colle
 	breaker := resilience.NewCircuitBreaker(resilience.BreakerSettings{
 		Name:              "otlp-export",
 		FailureThreshold:  rc.CircuitBreakerThreshold,
+		Interval:          rc.BreakerInterval,
 		OpenTimeout:       rc.CircuitBreakerTimeout,
-		MaxHalfOpenProbes: 1,
+		MaxHalfOpenProbes: rc.BreakerMaxHalfOpenProbes,
 	})
 	retry := resilience.RetryPolicy{
 		MaxAttempts:    rc.RetryMaxAttempts,
 		BaseDelay:      resilience.DefaultRetryBaseDelay,
-		MaxDelay:       resilience.DefaultRetryMaxDelay,
-		JitterFraction: resilience.DefaultRetryJitterFraction,
+		MaxDelay:       rc.RetryMaxDelay,
+		JitterFraction: rc.RetryJitterFraction,
 	}
 	if len(rc.RetryBackoffs) > 0 {
 		retry.BaseDelay = rc.RetryBackoffs[0]
@@ -168,7 +169,11 @@ func (c *Collector) drain() {
 		if _, ok := c.queue.Dequeue(); !ok {
 			return
 		}
-		emitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		emitTimeout := c.cfg.Agent.HeartbeatEmitTimeout
+		if emitTimeout <= 0 {
+			emitTimeout = 10 * time.Second
+		}
+		emitCtx, cancel := context.WithTimeout(context.Background(), emitTimeout)
 		if err := c.exp.ExportWithResilience(emitCtx, c.emitHeartbeat); err != nil {
 			c.logger.Warn("heartbeat export failed (guarded)", "error", err)
 		}

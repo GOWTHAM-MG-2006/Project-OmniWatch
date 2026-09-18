@@ -6,7 +6,34 @@
 // Outputs: Availability percentage + meets/misses verdict
 package alerting
 
-import "time"
+import (
+	"os"
+	"strconv"
+	"time"
+)
+
+// EffectiveSLOs returns the production SLOs with OMNIWATCH_SLO_HEALTH,
+// OMNIWATCH_SLO_EXPORT, and OMNIWATCH_SLO_LATENCY_P99 applied. The package
+// vars keep their compiled defaults; invalid env values are ignored.
+func EffectiveSLOs() (health, export, latency SLO) {
+	health, export, latency = HealthAvailabilitySLO, ExportSuccessSLO, ExportLatencySLO
+	if v := os.Getenv("OMNIWATCH_SLO_HEALTH"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			health.Target = f
+		}
+	}
+	if v := os.Getenv("OMNIWATCH_SLO_EXPORT"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			export.Target = f
+		}
+	}
+	if v := os.Getenv("OMNIWATCH_SLO_LATENCY_P99"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			latency.Target = f
+		}
+	}
+	return health, export, latency
+}
 
 // SLO is one service-level objective: the minimum good-event ratio over a
 // window, expressed as a percentage (99.9 = three nines).

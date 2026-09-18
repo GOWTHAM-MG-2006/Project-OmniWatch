@@ -63,6 +63,35 @@ func clearEnv(t *testing.T) {
 		"OMNIWATCH_RECEIVER_K8S_CLUSTER_NODE_CONDITIONS_TO_REPORT",
 		"OMNIWATCH_EXPORTER_OTLP_ENDPOINT",
 		"OMNIWATCH_EXPORTER_OTLP_INSECURE",
+		"OMNIWATCH_HEALTH_ADDR",
+		"OMNIWATCH_AGENT_SHUTDOWN_TIMEOUT_S",
+		"OMNIWATCH_EXPORTER_INIT_TIMEOUT_S",
+		"OMNIWATCH_HEALTH_READ_TIMEOUT_S",
+		"OMNIWATCH_HEALTH_WRITE_TIMEOUT_S",
+		"OMNIWATCH_HEARTBEAT_EMIT_TIMEOUT_S",
+		"OMNIWATCH_METRIC_EXPORT_INTERVAL_S",
+		"OMNIWATCH_TLS_CERT_FILE",
+		"OMNIWATCH_TLS_KEY_FILE",
+		"OMNIWATCH_TLS_CA_FILE",
+		"OMNIWATCH_TLS_FETCH_TIMEOUT_S",
+		"OMNIWATCH_BEYLA_OTLP_ENDPOINT",
+		"OMNIWATCH_BEYLA_LOG_LEVEL",
+		"OMNIWATCH_BEYLA_DISCOVERY_PORTS",
+		"OMNIWATCH_BEYLA_EXCLUDE_NAMESPACES",
+		"OMNIWATCH_BEYLA_WAKEUP_LEN",
+		"OMNIWATCH_ALERTING_RULES_PATH",
+		"OMNIWATCH_ALERTING_SCRAPE_INTERVAL",
+		"OMNIWATCH_ALERTING_FOR_DEFAULT",
+		"OMNIWATCH_SLO_HEALTH",
+		"OMNIWATCH_SLO_EXPORT",
+		"OMNIWATCH_SLO_LATENCY_P99",
+		"OMNIWATCH_RESILIENCE_BREAKER_INTERVAL_S",
+		"OMNIWATCH_RESILIENCE_BREAKER_MAX_HALF_OPEN_PROBES",
+		"OMNIWATCH_RESILIENCE_RETRY_MAX_DELAY",
+		"OMNIWATCH_RESILIENCE_RETRY_JITTER_FRACTION",
+		"OMNIWATCH_RECEIVER_FILELOG_EXCLUDE",
+		"OMNIWATCH_RECEIVER_FILELOG_START_AT",
+		"OMNIWATCH_RECEIVER_K8S_OBJECTS",
 	} {
 		t.Setenv(k, "")
 		if err := os.Unsetenv(k); err != nil {
@@ -207,17 +236,18 @@ func TestLoadK8sReceivers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Receiver.K8sObjects.CollectionInterval != 30*time.Second {
-		t.Errorf("k8s_objects interval = %v, want 30s", cfg.Receiver.K8sObjects.CollectionInterval)
+	// DYN-goagent: reconciled to the compiled Go defaults (yaml == Default()).
+	if cfg.Receiver.K8sObjects.CollectionInterval != 15*time.Minute {
+		t.Errorf("k8s_objects interval = %v, want 15m", cfg.Receiver.K8sObjects.CollectionInterval)
 	}
-	if cfg.Receiver.K8sObjects.Mode != "watch" {
-		t.Errorf("k8s_objects mode = %q, want watch", cfg.Receiver.K8sObjects.Mode)
+	if cfg.Receiver.K8sObjects.Mode != "pull" {
+		t.Errorf("k8s_objects mode = %q, want pull", cfg.Receiver.K8sObjects.Mode)
 	}
 	if cfg.Receiver.K8sObjects.LabelSelector != "" {
 		t.Errorf("k8s_objects label selector = %q, want empty", cfg.Receiver.K8sObjects.LabelSelector)
 	}
-	if cfg.Receiver.K8sObjects.FieldSelector != "metadata.namespace=omniwatch" {
-		t.Errorf("k8s_objects field selector = %q, want metadata.namespace=omniwatch", cfg.Receiver.K8sObjects.FieldSelector)
+	if cfg.Receiver.K8sObjects.FieldSelector != "" {
+		t.Errorf("k8s_objects field selector = %q, want empty", cfg.Receiver.K8sObjects.FieldSelector)
 	}
 	wantObjects := []string{
 		"pods",
@@ -238,10 +268,11 @@ func TestLoadK8sReceivers(t *testing.T) {
 			t.Errorf("k8s_objects objects[%d] = %q, want %q", i, cfg.Receiver.K8sObjects.Objects[i].Name, want)
 		}
 	}
-	if cfg.Receiver.K8sCluster.CollectionInterval != 60*time.Second {
-		t.Errorf("k8s_cluster interval = %v, want 60s", cfg.Receiver.K8sCluster.CollectionInterval)
+	// DYN-goagent: reconciled to the compiled Go defaults (yaml == Default()).
+	if cfg.Receiver.K8sCluster.CollectionInterval != 10*time.Minute {
+		t.Errorf("k8s_cluster interval = %v, want 10m", cfg.Receiver.K8sCluster.CollectionInterval)
 	}
-	wantConditions := []string{"Ready", "MemoryPressure", "DiskPressure", "PIDPressure"}
+	wantConditions := []string{"Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"}
 	if len(cfg.Receiver.K8sCluster.NodeConditionsToReport) != len(wantConditions) {
 		t.Fatalf("k8s_cluster conditions = %v, want %v", cfg.Receiver.K8sCluster.NodeConditionsToReport, wantConditions)
 	}

@@ -31,8 +31,10 @@ kubectl apply --dry-run=client -f k8s/spire-agent/daemonset.yaml
 
 - Socket: spire-agent serves `unix:///tmp/spire-agent/public/api.sock`
   (SPIRE default), backed by hostPath `/tmp/spire-agent/public`.
-- The omniwatch-agent DaemonSet must mount the SAME hostPath so its
-  `tls.spiffe_socket_path` default works verbatim:
+- DYN-goagent: the omniwatch-agent DaemonSet now mounts the SAME hostPath
+  (`spire-socket` volume, `DirectoryOrCreate`) so its
+  `tls.spiffe_socket_path` default works verbatim. Follow-up closed.
+  Pre-DYN trees still need the manual block below:
 
 ```yaml
 volumeMounts:

@@ -39,6 +39,19 @@ type Config struct {
 	Agent struct {
 		CollectionInterval time.Duration `yaml:"collection_interval"`
 		LogLevel           string        `yaml:"log_level"`
+		// HealthAddr is the :port (or host:port) the /health + /ready
+		// server listens on. Flag -health-addr > OMNIWATCH_HEALTH_ADDR.
+		HealthAddr string `yaml:"health_addr"`
+		// ShutdownTimeout bounds graceful shutdown of the HTTP server,
+		// collector drain, and OTel SDK providers.
+		ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+		// HealthReadTimeout/HealthWriteTimeout bound the health HTTP server.
+		HealthReadTimeout  time.Duration `yaml:"health_read_timeout"`
+		HealthWriteTimeout time.Duration `yaml:"health_write_timeout"`
+		// ExportInitTimeout bounds OTel SDK initialization at boot.
+		ExportInitTimeout time.Duration `yaml:"export_init_timeout"`
+		// HeartbeatEmitTimeout bounds a single guarded heartbeat emission.
+		HeartbeatEmitTimeout time.Duration `yaml:"heartbeat_emit_timeout"`
 	} `yaml:"agent"`
 	Receiver struct {
 		Hostmetrics struct {
@@ -66,15 +79,49 @@ type Config struct {
 		OTLP struct {
 			Endpoint string `yaml:"endpoint"`
 			Insecure bool   `yaml:"insecure"`
+			// MetricExportInterval controls the periodic metric reader flush.
+			MetricExportInterval time.Duration `yaml:"metric_export_interval"`
 		} `yaml:"otlp"`
 	} `yaml:"exporter"`
 	TLS struct {
 		CertRotationInterval time.Duration `yaml:"cert_rotation_interval"`
 		SpiffeSocketPath     string        `yaml:"spiffe_socket_path"`
 		TrustDomain          string        `yaml:"trust_domain"`
+		// CertFile/KeyFile/CAFile pin a file-based identity used when the
+		// SPIRE agent is unreachable (dev/test). Empty means SPIRE-only.
+		CertFile string `yaml:"cert_file"`
+		KeyFile  string `yaml:"key_file"`
+		CAFile   string `yaml:"ca_file"`
+		// FetchTimeout bounds a single Workload API attestation attempt.
+		FetchTimeout time.Duration `yaml:"fetch_timeout"`
 	} `yaml:"tls"`
-	Auth AuthConfig `yaml:"auth"`
+	Auth      AuthConfig      `yaml:"auth"`
 	Resilience ResilienceConfig `yaml:"resilience"`
+	Alerting  AlertingConfig  `yaml:"alerting"`
+	Beyla     BeylaConfig     `yaml:"beyla"`
+}
+
+// AlertingConfig tunes rule-file loading and SLO targets. Rule semantics
+// (expr/for/labels) stay in configs/alerts/prometheusrules.yaml; these knobs
+// only select the file, the group evaluation interval, and the numeric SLO
+// targets checked by internal/alerting.
+type AlertingConfig struct {
+	RulesPath      string        `yaml:"rules_path"`
+	ScrapeInterval time.Duration `yaml:"scrape_interval"`
+	ForDefault     time.Duration `yaml:"for_default"`
+	SLOHealth      float64       `yaml:"slo_health"`
+	SLOExport      float64       `yaml:"slo_export"`
+	SLOLatencyP99  float64       `yaml:"slo_latency_p99"`
+}
+
+// BeylaConfig tunes the Beyla eBPF sidecar. OTLPEndpoint empty means "follow
+// the agent exporter endpoint" (with an http:// scheme added for Beyla v3).
+type BeylaConfig struct {
+	OTLPEndpoint      string `yaml:"otlp_endpoint"`
+	LogLevel          string `yaml:"log_level"`
+	DiscoveryPorts    string `yaml:"discovery_ports"`
+	ExcludeNamespaces string `yaml:"exclude_namespaces"`
+	WakeupLen         int    `yaml:"wakeup_len"`
 }
 
 // AuthConfig tunes the IND-3 health-endpoint auth chain.
@@ -105,6 +152,15 @@ type ResilienceConfig struct {
 	RetryBaseDelay time.Duration `yaml:"retry_base_delay"`
 	// RetryBackoffs is the per-wait backoff schedule (100ms, 500ms, 2s).
 	RetryBackoffs []time.Duration `yaml:"retry_backoffs"`
+	// BreakerInterval is the gobreaker counts window; stale failure counts
+	// reset on this cadence so one old burst never trips the breaker forever.
+	BreakerInterval time.Duration `yaml:"breaker_interval"`
+	// BreakerMaxHalfOpenProbes caps concurrent requests in half-open state.
+	BreakerMaxHalfOpenProbes uint32 `yaml:"breaker_max_half_open_probes"`
+	// RetryMaxDelay caps the exponential backoff wait (growth is 5x).
+	RetryMaxDelay time.Duration `yaml:"retry_max_delay"`
+	// RetryJitterFraction adds uniform [0, base*fraction) spread per wait.
+	RetryJitterFraction float64 `yaml:"retry_jitter_fraction"`
 }
 
 // Resilience defaults per the industry-ready plan: breaker trips after 5
@@ -112,12 +168,16 @@ type ResilienceConfig struct {
 // a 100ms → 500ms → 2s schedule with max 3 attempts.
 func DefaultResilience() ResilienceConfig {
 	return ResilienceConfig{
-		CircuitBreakerThreshold: 5,
-		CircuitBreakerTimeout:   30 * time.Second,
-		QueueSize:               1000,
-		RetryMaxAttempts:        3,
-		RetryBaseDelay:          100 * time.Millisecond,
-		RetryBackoffs:           []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second},
+		CircuitBreakerThreshold:  5,
+		CircuitBreakerTimeout:    30 * time.Second,
+		BreakerInterval:          30 * time.Second,
+		BreakerMaxHalfOpenProbes: 1,
+		QueueSize:                1000,
+		RetryMaxAttempts:         3,
+		RetryBaseDelay:           100 * time.Millisecond,
+		RetryBackoffs:            []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second},
+		RetryMaxDelay:            2 * time.Second,
+		RetryJitterFraction:      0.5,
 	}
 }
 
@@ -142,6 +202,18 @@ func (r *ResilienceConfig) WithDefaults() {
 	if len(r.RetryBackoffs) == 0 {
 		r.RetryBackoffs = def.RetryBackoffs
 	}
+	if r.BreakerInterval <= 0 {
+		r.BreakerInterval = def.BreakerInterval
+	}
+	if r.BreakerMaxHalfOpenProbes == 0 {
+		r.BreakerMaxHalfOpenProbes = def.BreakerMaxHalfOpenProbes
+	}
+	if r.RetryMaxDelay <= 0 {
+		r.RetryMaxDelay = def.RetryMaxDelay
+	}
+	if r.RetryJitterFraction <= 0 {
+		r.RetryJitterFraction = def.RetryJitterFraction
+	}
 }
 
 // Default returns a Config populated with default values.
@@ -149,6 +221,12 @@ func Default() *Config {
 	c := &Config{}
 	c.Agent.CollectionInterval = 60 * time.Second
 	c.Agent.LogLevel = "info"
+	c.Agent.HealthAddr = ":8080"
+	c.Agent.ShutdownTimeout = 10 * time.Second
+	c.Agent.HealthReadTimeout = 5 * time.Second
+	c.Agent.HealthWriteTimeout = 5 * time.Second
+	c.Agent.ExportInitTimeout = 10 * time.Second
+	c.Agent.HeartbeatEmitTimeout = 10 * time.Second
 	c.Receiver.Hostmetrics.CollectionInterval = 60 * time.Second
 	c.Receiver.Filelog.Include = []string{"/var/log/pods/*/*/*.log", "/var/log/containers/*/*.log", "/var/log/kubernetes/audit/*.log"}
 	c.Receiver.Filelog.Exclude = []string{"/var/log/pods/*/*/**.gz"}
@@ -174,13 +252,43 @@ func Default() *Config {
 	}
 	c.Exporter.OTLP.Endpoint = "otel-collector:4317"
 	c.Exporter.OTLP.Insecure = true
+	c.Exporter.OTLP.MetricExportInterval = 10 * time.Second
 	c.TLS.CertRotationInterval = 24 * time.Hour
 	c.TLS.SpiffeSocketPath = "unix:///tmp/spire-agent/public/api.sock"
 	c.TLS.TrustDomain = "example.org"
+	c.TLS.CertFile = ""
+	c.TLS.KeyFile = ""
+	c.TLS.CAFile = ""
+	c.TLS.FetchTimeout = 5 * time.Second
 	c.Auth.Mode = "dev"
 	c.Auth.TrustedCAFile = ""
 	c.Resilience = DefaultResilience()
+	c.Alerting.RulesPath = "configs/alerts/prometheusrules.yaml"
+	c.Alerting.ScrapeInterval = 30 * time.Second
+	c.Alerting.ForDefault = 0
+	c.Alerting.SLOHealth = 99.9
+	c.Alerting.SLOExport = 99.0
+	c.Alerting.SLOLatencyP99 = 5
+	c.Beyla.OTLPEndpoint = ""
+	c.Beyla.LogLevel = "INFO"
+	c.Beyla.DiscoveryPorts = "80,443,8000-8999"
+	c.Beyla.ExcludeNamespaces = "kube-system"
+	c.Beyla.WakeupLen = 100
 	return c
+}
+
+// EffectiveBeylaEndpoint resolves the OTLP endpoint the Beyla sidecar should
+// use: an explicit Beyla override wins, otherwise the agent exporter endpoint
+// is followed with an http:// scheme added (Beyla v3 rejects bare host:port).
+func (c *Config) EffectiveBeylaEndpoint() string {
+	if c.Beyla.OTLPEndpoint != "" {
+		return c.Beyla.OTLPEndpoint
+	}
+	ep := c.Exporter.OTLP.Endpoint
+	if strings.HasPrefix(ep, "http://") || strings.HasPrefix(ep, "https://") {
+		return ep
+	}
+	return "http://" + ep
 }
 
 // Load reads the YAML file at path, then applies OMNIWATCH_* env overrides.
@@ -213,6 +321,34 @@ func applyEnvOverrides(c *Config) {
 	if v, ok := lookupEnv("OMNIWATCH_AGENT_LOG_LEVEL"); ok {
 		c.Agent.LogLevel = v
 	}
+	if v, ok := lookupEnv("OMNIWATCH_HEALTH_ADDR"); ok {
+		c.Agent.HealthAddr = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_AGENT_SHUTDOWN_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Agent.ShutdownTimeout = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_EXPORTER_INIT_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Agent.ExportInitTimeout = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_HEALTH_READ_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Agent.HealthReadTimeout = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_HEALTH_WRITE_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Agent.HealthWriteTimeout = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_HEARTBEAT_EMIT_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Agent.HeartbeatEmitTimeout = d
+		}
+	}
 	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_HOSTMETRICS_COLLECTION_INTERVAL"); ok {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.Receiver.Hostmetrics.CollectionInterval = d
@@ -220,6 +356,12 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_FILELOG_INCLUDE"); ok {
 		c.Receiver.Filelog.Include = splitList(v)
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_FILELOG_EXCLUDE"); ok {
+		c.Receiver.Filelog.Exclude = splitList(v)
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_FILELOG_START_AT"); ok {
+		c.Receiver.Filelog.StartAt = v
 	}
 	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_K8S_OBJECTS_COLLECTION_INTERVAL"); ok {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -234,6 +376,16 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_K8S_OBJECTS_FIELD_SELECTOR"); ok {
 		c.Receiver.K8sObjects.FieldSelector = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_K8S_OBJECTS"); ok {
+		names := splitList(v)
+		objs := make([]K8sObject, 0, len(names))
+		for _, n := range names {
+			objs = append(objs, K8sObject{Name: n})
+		}
+		if len(objs) > 0 {
+			c.Receiver.K8sObjects.Objects = objs
+		}
 	}
 	if v, ok := lookupEnv("OMNIWATCH_RECEIVER_K8S_CLUSTER_COLLECTION_INTERVAL"); ok {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -251,6 +403,28 @@ func applyEnvOverrides(c *Config) {
 			c.Exporter.OTLP.Insecure = b
 		}
 	}
+	if v, ok := lookupEnv("OMNIWATCH_METRIC_EXPORT_INTERVAL_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Exporter.OTLP.MetricExportInterval = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_BEYLA_OTLP_ENDPOINT"); ok {
+		c.Beyla.OTLPEndpoint = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_BEYLA_LOG_LEVEL"); ok {
+		c.Beyla.LogLevel = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_BEYLA_DISCOVERY_PORTS"); ok {
+		c.Beyla.DiscoveryPorts = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_BEYLA_EXCLUDE_NAMESPACES"); ok {
+		c.Beyla.ExcludeNamespaces = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_BEYLA_WAKEUP_LEN"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Beyla.WakeupLen = n
+		}
+	}
 	if v, ok := lookupEnv("OMNIWATCH_TLS_CERT_ROTATION_INTERVAL"); ok {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.TLS.CertRotationInterval = d
@@ -261,6 +435,48 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v, ok := lookupEnv("OMNIWATCH_TLS_TRUST_DOMAIN"); ok {
 		c.TLS.TrustDomain = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_CERT_FILE"); ok {
+		c.TLS.CertFile = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_KEY_FILE"); ok {
+		c.TLS.KeyFile = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_CA_FILE"); ok {
+		c.TLS.CAFile = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_TLS_FETCH_TIMEOUT_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.TLS.FetchTimeout = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_ALERTING_RULES_PATH"); ok {
+		c.Alerting.RulesPath = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_ALERTING_SCRAPE_INTERVAL"); ok {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Alerting.ScrapeInterval = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_ALERTING_FOR_DEFAULT"); ok {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Alerting.ForDefault = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_SLO_HEALTH"); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			c.Alerting.SLOHealth = f
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_SLO_EXPORT"); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			c.Alerting.SLOExport = f
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_SLO_LATENCY_P99"); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			c.Alerting.SLOLatencyP99 = f
+		}
 	}
 	if v, ok := lookupEnv("OMNIWATCH_AUTH_MODE"); ok {
 		c.Auth.Mode = v
@@ -297,6 +513,26 @@ func applyEnvOverrides(c *Config) {
 			c.Resilience.RetryBaseDelay = ds[0]
 		}
 	}
+	if v, ok := lookupEnv("OMNIWATCH_RESILIENCE_BREAKER_INTERVAL_S"); ok {
+		if d, err := parseSeconds(v); err == nil && d > 0 {
+			c.Resilience.BreakerInterval = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RESILIENCE_BREAKER_MAX_HALF_OPEN_PROBES"); ok {
+		if n, err := strconv.ParseUint(v, 10, 32); err == nil && n > 0 {
+			c.Resilience.BreakerMaxHalfOpenProbes = uint32(n)
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RESILIENCE_RETRY_MAX_DELAY"); ok {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Resilience.RetryMaxDelay = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_RESILIENCE_RETRY_JITTER_FRACTION"); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			c.Resilience.RetryJitterFraction = f
+		}
+	}
 	if v, ok := lookupEnv("OMNIWATCH_RESILIENCE_RETRY_BASE_DELAY"); ok {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			c.Resilience.RetryBaseDelay = d
@@ -316,6 +552,16 @@ func lookupEnv(key string) (string, bool) {
 		return "", false
 	}
 	return v, true
+}
+
+// parseSeconds parses a bare-seconds value ("10", "2.5") into a duration.
+// The _S-suffixed timeout knobs use plain seconds so K8s env values stay
+// numeric; a Go duration string ("10s") is also accepted.
+func parseSeconds(v string) (time.Duration, error) {
+	if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+		return time.Duration(f * float64(time.Second)), nil
+	}
+	return time.ParseDuration(strings.TrimSpace(v))
 }
 
 func splitDurations(v string) ([]time.Duration, error) {
