@@ -28,18 +28,27 @@ receiver:
         severity:
           parse_from: attributes.level
   k8s_objects:
-    collection_interval: 15m
-    mode: pull # watch or pull
+    collection_interval: 30s
+    mode: watch
     label_selector: ""
-    field_selector: ""
+    field_selector: "metadata.namespace=omniwatch"
+    objects:
+      - name: pods
+      - name: nodes
+      - name: services
+      - name: endpoints
+      - name: namespaces
+      - name: deployments
+      - name: replicasets
+      - name: daemonsets
+      - name: statefulsets
   k8s_cluster:
-    collection_interval: 10m
+    collection_interval: 60s
     node_conditions_to_report:
       - Ready
       - MemoryPressure
       - DiskPressure
       - PIDPressure
-      - NetworkUnavailable
 exporter:
   otlp:
     endpoint: otel-collector:4317

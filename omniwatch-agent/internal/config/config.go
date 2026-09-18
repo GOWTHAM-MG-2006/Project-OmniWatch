@@ -29,6 +29,11 @@ type FilelogOperator struct {
 	Severity  *FilelogOperatorField `yaml:"severity,omitempty"`
 }
 
+// K8sObject is a single k8s_objects receiver watched object (e.g. pods).
+type K8sObject struct {
+	Name string `yaml:"name"`
+}
+
 // Config is the root configuration for the omniwatch-agent.
 type Config struct {
 	Agent struct {
@@ -50,6 +55,7 @@ type Config struct {
 			Mode               string        `yaml:"mode"` // watch or pull
 			LabelSelector      string        `yaml:"label_selector"`
 			FieldSelector      string        `yaml:"field_selector"`
+			Objects            []K8sObject   `yaml:"objects"`
 		} `yaml:"k8s_objects"`
 		K8sCluster struct {
 			CollectionInterval     time.Duration `yaml:"collection_interval"`

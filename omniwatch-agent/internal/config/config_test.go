@@ -199,6 +199,59 @@ func TestLoadFilelogReceiver(t *testing.T) {
 	}
 }
 
+func TestLoadK8sReceivers(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join("..", "..", "configs", "agent.yaml")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Receiver.K8sObjects.CollectionInterval != 30*time.Second {
+		t.Errorf("k8s_objects interval = %v, want 30s", cfg.Receiver.K8sObjects.CollectionInterval)
+	}
+	if cfg.Receiver.K8sObjects.Mode != "watch" {
+		t.Errorf("k8s_objects mode = %q, want watch", cfg.Receiver.K8sObjects.Mode)
+	}
+	if cfg.Receiver.K8sObjects.LabelSelector != "" {
+		t.Errorf("k8s_objects label selector = %q, want empty", cfg.Receiver.K8sObjects.LabelSelector)
+	}
+	if cfg.Receiver.K8sObjects.FieldSelector != "metadata.namespace=omniwatch" {
+		t.Errorf("k8s_objects field selector = %q, want metadata.namespace=omniwatch", cfg.Receiver.K8sObjects.FieldSelector)
+	}
+	wantObjects := []string{
+		"pods",
+		"nodes",
+		"services",
+		"endpoints",
+		"namespaces",
+		"deployments",
+		"replicasets",
+		"daemonsets",
+		"statefulsets",
+	}
+	if len(cfg.Receiver.K8sObjects.Objects) != len(wantObjects) {
+		t.Fatalf("k8s_objects objects = %v, want %v", cfg.Receiver.K8sObjects.Objects, wantObjects)
+	}
+	for i, want := range wantObjects {
+		if cfg.Receiver.K8sObjects.Objects[i].Name != want {
+			t.Errorf("k8s_objects objects[%d] = %q, want %q", i, cfg.Receiver.K8sObjects.Objects[i].Name, want)
+		}
+	}
+	if cfg.Receiver.K8sCluster.CollectionInterval != 60*time.Second {
+		t.Errorf("k8s_cluster interval = %v, want 60s", cfg.Receiver.K8sCluster.CollectionInterval)
+	}
+	wantConditions := []string{"Ready", "MemoryPressure", "DiskPressure", "PIDPressure"}
+	if len(cfg.Receiver.K8sCluster.NodeConditionsToReport) != len(wantConditions) {
+		t.Fatalf("k8s_cluster conditions = %v, want %v", cfg.Receiver.K8sCluster.NodeConditionsToReport, wantConditions)
+	}
+	for i, want := range wantConditions {
+		if cfg.Receiver.K8sCluster.NodeConditionsToReport[i] != want {
+			t.Errorf("k8s_cluster conditions[%d] = %q, want %q", i, cfg.Receiver.K8sCluster.NodeConditionsToReport[i], want)
+		}
+	}
+}
+
 const testFilelogYAML = `agent:
   collection_interval: 60s
   log_level: info
