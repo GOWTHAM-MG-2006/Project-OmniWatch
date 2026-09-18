@@ -16,6 +16,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FilelogOperatorField maps a json_parser timestamp/severity extraction rule.
+type FilelogOperatorField struct {
+	ParseFrom string `yaml:"parse_from"`
+	Layout    string `yaml:"layout,omitempty"`
+}
+
+// FilelogOperator is a single filelog receiver operator (e.g. json_parser).
+type FilelogOperator struct {
+	Type      string                `yaml:"type"`
+	Timestamp *FilelogOperatorField `yaml:"timestamp,omitempty"`
+	Severity  *FilelogOperatorField `yaml:"severity,omitempty"`
+}
+
 // Config is the root configuration for the omniwatch-agent.
 type Config struct {
 	Agent struct {
@@ -27,7 +40,10 @@ type Config struct {
 			CollectionInterval time.Duration `yaml:"collection_interval"`
 		} `yaml:"hostmetrics"`
 		Filelog struct {
-			Include []string `yaml:"include"`
+			Include   []string          `yaml:"include"`
+			Exclude   []string          `yaml:"exclude"`
+			StartAt   string            `yaml:"start_at"`
+			Operators []FilelogOperator `yaml:"operators"`
 		} `yaml:"filelog"`
 		K8sObjects struct {
 			CollectionInterval time.Duration `yaml:"collection_interval"`
@@ -54,7 +70,16 @@ func Default() *Config {
 	c.Agent.CollectionInterval = 60 * time.Second
 	c.Agent.LogLevel = "info"
 	c.Receiver.Hostmetrics.CollectionInterval = 60 * time.Second
-	c.Receiver.Filelog.Include = []string{"/var/log/*.log"}
+	c.Receiver.Filelog.Include = []string{"/var/log/pods/*/*/*.log", "/var/log/containers/*/*.log", "/var/log/kubernetes/audit/*.log"}
+	c.Receiver.Filelog.Exclude = []string{"/var/log/pods/*/*/**.gz"}
+	c.Receiver.Filelog.StartAt = "beginning"
+	c.Receiver.Filelog.Operators = []FilelogOperator{
+		{
+			Type:      "json_parser",
+			Timestamp: &FilelogOperatorField{ParseFrom: "attributes.time", Layout: "RFC3339"},
+			Severity:  &FilelogOperatorField{ParseFrom: "attributes.level"},
+		},
+	}
 	c.Receiver.K8sObjects.CollectionInterval = 15 * time.Minute
 	c.Receiver.K8sObjects.Mode = "pull"
 	c.Receiver.K8sObjects.LabelSelector = ""

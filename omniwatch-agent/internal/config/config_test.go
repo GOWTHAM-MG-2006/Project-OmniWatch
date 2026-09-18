@@ -154,6 +154,75 @@ func TestEnvOverridesYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFilelogReceiver(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join("..", "..", "configs", "agent.yaml")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = writeTempYAML(t, testFilelogYAML)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantInclude := []string{
+		"/var/log/pods/*/*/*.log",
+		"/var/log/containers/*/*.log",
+		"/var/log/kubernetes/audit/*.log",
+	}
+	if len(cfg.Receiver.Filelog.Include) != len(wantInclude) {
+		t.Fatalf("filelog include = %v, want %v", cfg.Receiver.Filelog.Include, wantInclude)
+	}
+	for i, want := range wantInclude {
+		if cfg.Receiver.Filelog.Include[i] != want {
+			t.Errorf("filelog include[%d] = %q, want %q", i, cfg.Receiver.Filelog.Include[i], want)
+		}
+	}
+	if len(cfg.Receiver.Filelog.Exclude) != 1 || cfg.Receiver.Filelog.Exclude[0] != "/var/log/pods/*/*/**.gz" {
+		t.Errorf("filelog exclude = %v, want [/var/log/pods/*/*/**.gz]", cfg.Receiver.Filelog.Exclude)
+	}
+	if cfg.Receiver.Filelog.StartAt != "beginning" {
+		t.Errorf("filelog start_at = %q, want beginning", cfg.Receiver.Filelog.StartAt)
+	}
+	if len(cfg.Receiver.Filelog.Operators) != 1 {
+		t.Fatalf("filelog operators = %v, want 1 json_parser operator", cfg.Receiver.Filelog.Operators)
+	}
+	op := cfg.Receiver.Filelog.Operators[0]
+	if op.Type != "json_parser" {
+		t.Errorf("operator type = %q, want json_parser", op.Type)
+	}
+	if op.Timestamp == nil || op.Timestamp.ParseFrom != "attributes.time" || op.Timestamp.Layout != "RFC3339" {
+		t.Errorf("operator timestamp = %+v, want {attributes.time RFC3339}", op.Timestamp)
+	}
+	if op.Severity == nil || op.Severity.ParseFrom != "attributes.level" {
+		t.Errorf("operator severity = %+v, want {attributes.level}", op.Severity)
+	}
+}
+
+const testFilelogYAML = `agent:
+  collection_interval: 60s
+  log_level: info
+receiver:
+  filelog:
+    include:
+      - /var/log/pods/*/*/*.log
+      - /var/log/containers/*/*.log
+      - /var/log/kubernetes/audit/*.log
+    exclude:
+      - /var/log/pods/*/*/**.gz
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: RFC3339
+        severity:
+          parse_from: attributes.level
+exporter:
+  otlp:
+    endpoint: test-collector:4317
+    insecure: false
+`
 func TestLoadDefaultsWhenMissingFile(t *testing.T) {
 	clearEnv(t)
 	cfg, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))

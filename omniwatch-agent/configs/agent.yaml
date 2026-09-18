@@ -14,7 +14,19 @@ receiver:
       load:
   filelog:
     include:
-      - /var/log/*.log
+      - /var/log/pods/*/*/*.log
+      - /var/log/containers/*/*.log
+      - /var/log/kubernetes/audit/*.log
+    exclude:
+      - /var/log/pods/*/*/**.gz
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: RFC3339
+        severity:
+          parse_from: attributes.level
   k8s_objects:
     collection_interval: 15m
     mode: pull # watch or pull
