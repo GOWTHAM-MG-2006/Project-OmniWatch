@@ -39,6 +39,7 @@ Thumbs.db
 .gitnexus/
 .claude/
 CLAUDE.md
+.playwright-mcp/
 
 # Data
 *.csv

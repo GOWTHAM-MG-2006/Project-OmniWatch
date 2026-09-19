@@ -15,13 +15,18 @@ permissions:
   id-token: write # keyless cosign OIDC
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/omniwatch-agent:${{ github.ref_name }}
+  IMAGE: ghcr.io/${{ env.OWNER_LC }}/omniwatch-agent:${{ github.ref_name }}
 
 jobs:
   build-sbom-sign:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Lowercase owner for GHCR
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Set SOURCE_DATE_EPOCH from last commit
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
