@@ -34,6 +34,29 @@ curl http://<pod-ip>:8080/health
 curl http://<pod-ip>:8080/ready
 ```
 
+## Namespace mapping
+
+Workspaces provision K8s namespaces using the pattern:
+
+```
+omniwatch-ws-<slug>
+```
+
+Where `<slug>` is the workspace slug auto-generated during provisioning
+(`identity/provision.py`). For example, workspace `Acme Backend` → slug
+`acme-backend` → namespace `omniwatch-ws-acme-backend`.
+
+When deploying this DaemonSet into a workspace-scoped namespace, update
+the `namespace` field in each manifest and set the `OMNIWATCH_*` env vars
+(see [`docs/workspace-isolation.md`](../../docs/workspace-isolation.md)):
+
+```bash
+# Apply to a workspace namespace:
+kubectl apply -f k8s/omniwatch-agent/rbac.yaml -n omniwatch-ws-acme-backend
+kubectl apply -f k8s/omniwatch-agent/daemonset.yaml -n omniwatch-ws-acme-backend
+kubectl apply -f k8s/omniwatch-agent/service.yaml -n omniwatch-ws-acme-backend
+```
+
 ## Non-root notes
 
 - Pod `securityContext`: `runAsNonRoot: true`, `runAsUser: 65532`,

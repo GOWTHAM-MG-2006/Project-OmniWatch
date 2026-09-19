@@ -931,6 +931,32 @@ Environment variable overrides:
 | `OMNIWATCH_AUTH_API_KEY` | string | (empty) | API key for `apikey` mode |
 | `OMNIWATCH_AUTH_HEALTH_HANDLER` | string | `auto` | Health handler auth (`auto`, `require`, `optional`) |
 
+### Workspace-scoped agent
+
+When deploying the agent to a workspace-specific namespace, set these
+environment variables in the DaemonSet or deployment manifest. They scope
+Kafka topics, ClickHouse queries, MinIO prefixes, and Neo4j traversals
+to the active workspace (see [`docs/workspace-isolation.md`](../docs/workspace-isolation.md)):
+
+```yaml
+env:
+  - name: OMNIWATCH_WORKSPACE_SLUG
+    value: "acme-backend"
+  - name: OMNIWATCH_K8S_NAMESPACE
+    value: "omniwatch-ws-acme-backend"
+  - name: OMNIWATCH_CLICKHOUSE_DATABASE
+    value: "omniwatch_ws_acme-backend"
+  - name: OMNIWATCH_KAFKA_TOPIC_PREFIX
+    value: "ws_acme-backend."
+  - name: OMNIWATCH_MINIO_PREFIX
+    value: "workspaces/acme-backend/"
+```
+
+The `slug` is auto-generated from the workspace name during provisioning
+(`identity/provision.py`). All provisioned resources key off this slug —
+see the [entry-point guide](../docs/entry-point.md) for the full
+register → workspace → wizard → core journey.
+
 ### Health handler modes
 
 The `health_handler` setting controls whether the `:8080` health endpoints require authentication:
