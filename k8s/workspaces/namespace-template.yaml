@@ -1,0 +1,22 @@
+# K8s namespace template for one OmniWatch workspace (ENTRY-2, todo 2).
+#
+# DOCUMENTED MAPPING ONLY — nothing in OmniWatch provisions namespaces
+# automatically (no controller, job, or endpoint creates them). Cluster
+# deploys map workspaces to namespaces by hand (or a future todo):
+#   workspace <slug>  ->  namespace omniwatch-ws-<slug>
+#   workspace default ->  namespace omniwatch (today's namespace)
+#
+# Render by replacing <slug> (workspace slug, docs/workspace-isolation.md §2):
+#   (Get-Content k8s/workspaces/namespace-template.yaml) -replace '<slug>', 'acme' |
+#     kubectl apply -f -
+# Dry-run validation (no cluster state touched):
+#   kubectl apply --dry-run=client -f k8s/workspaces/namespace-template.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omniwatch-ws-<slug>
+  labels:
+    app.kubernetes.io/part-of: omniwatch
+    app.kubernetes.io/component: workspace
+    omniwatch.io/workspace: <slug>
+    omniwatch.io/managed-by: manual

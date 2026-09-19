@@ -162,6 +162,88 @@ MINIO_BUCKETS: Dict[str, str] = minio_buckets_from_env()
 SERVICE_PORTS: Dict[str, int] = service_ports_from_env()
 
 
+# --------------------------------------------------------------------------- #
+# Workspace isolation helpers — ENTRY-2 contract (docs/workspace-isolation.md).
+# These EXTEND the registries above; KAFKA_TOPICS / MINIO_BUCKETS values are
+# never replaced. The `default` workspace maps to today's bare names so
+# single-tenant behavior stays byte-identical; every other slug gets the
+# isolated mapping. Code must match docs/workspace-isolation.md verbatim.
+# --------------------------------------------------------------------------- #
+
+#: Bootstrap constants: first-boot user + workspace (zero-config legacy path).
+DEFAULT_WORKSPACE_SLUG = "default"
+DEFAULT_BOOTSTRAP_USER_EMAIL = "local-dev"
+
+#: Kafka topic prefix for non-default workspaces: ws_<slug>.omniwatch.*
+WORKSPACE_TOPIC_PREFIX_TEMPLATE = "ws_{slug}."
+
+
+def workspace_kafka_prefix(slug: str) -> str:
+    """Kafka topic prefix for a workspace slug.
+
+    Non-default: ``ws_<slug>.`` (prepended to the bare topic name).
+    ``default``: ``""`` (bare names, e.g. ``omniwatch.anomalies.detected``).
+    """
+    if slug == DEFAULT_WORKSPACE_SLUG:
+        return ""
+    return WORKSPACE_TOPIC_PREFIX_TEMPLATE.format(slug=slug)
+
+
+def workspace_topic(slug: str, base_topic: str) -> str:
+    """Scope a bare Kafka topic name to a workspace.
+
+    ``workspace_topic("acme", "omniwatch.anomalies.detected")`` →
+    ``"ws_acme.omniwatch.anomalies.detected"``; ``default`` returns the
+    bare topic unchanged.
+    """
+    return f"{workspace_kafka_prefix(slug)}{base_topic}"
+
+
+def workspace_topics(slug: str) -> Dict[str, str]:
+    """Return the full KAFKA_TOPICS registry scoped to a workspace."""
+    return {key: workspace_topic(slug, base)
+            for key, base in KAFKA_TOPICS.items()}
+
+
+def workspace_database(slug: str, base_db: str = "omniwatch") -> str:
+    """ClickHouse database for a workspace slug.
+
+    Non-default: ``omniwatch_ws_<slug>``; ``default``: the bare ``omniwatch``.
+    """
+    if slug == DEFAULT_WORKSPACE_SLUG:
+        return base_db
+    return f"{base_db}_ws_{slug}"
+
+
+def workspace_prefix(slug: str) -> str:
+    """MinIO key prefix for a workspace slug.
+
+    Non-default: ``workspaces/<slug>/`` inside the EXISTING buckets (no new
+    buckets); ``default``: ``""`` (bare keys, today's layout).
+    """
+    if slug == DEFAULT_WORKSPACE_SLUG:
+        return ""
+    return f"workspaces/{slug}/"
+
+
+def workspace_k8s_namespace(slug: str) -> str:
+    """K8s namespace mapping for a workspace slug (documented, NOT provisioned).
+
+    Non-default: ``omniwatch-ws-<slug>``; ``default``: ``omniwatch``.
+    """
+    if slug == DEFAULT_WORKSPACE_SLUG:
+        return "omniwatch"
+    return f"omniwatch-ws-{slug}"
+
+
+def workspace_neo4j_match(slug: str) -> str:
+    """Neo4j scoping-node match properties for a workspace slug.
+
+    Entity nodes carry ``BELONGS_TO`` edges to ``(:Workspace{slug: ...})``.
+    """
+    return slug
+
+
 @dataclass(init=False)
 class StorageConfig:
     """Connection parameters for all Unified Storage Layer backends.
