@@ -17,6 +17,10 @@ minio>=7.2.0                        # MinIO object storage client (main.py)
 # -- HTTP client (service proxies) ---------------------------------------------
 httpx>=0.27.0                       # Async HTTP client (genai/orchestration proxies)
 
+# -- Auth (workspace_scope.py JWT decode) -------------------------------------
+pyjwt>=2.8.0                        # HS256 JWT verify (identity.tokens)
+
 # -- Configuration / validation ------------------------------------------------
 pydantic>=2.5.0                     # Data validation
+pydantic-settings>=2.1.0            # Settings management (identity.settings)
 python-multipart>=0.0.6             # Form data support (FastAPI dependency)

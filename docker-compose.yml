@@ -605,6 +605,7 @@ services:
       LEARNING_SERVICE_URL: http://learning:8030
       GENAI_SERVICE_URL: http://genai:8020
       ORCHESTRATION_SERVICE_URL: http://orchestration:8010
+      OMNIWATCH_IDENTITY_URL: http://identity:8012
       MODEL_SETTINGS_PATH: /app/.omniwatch/model-settings.json
     volumes:
       - ./.omniwatch:/app/.omniwatch

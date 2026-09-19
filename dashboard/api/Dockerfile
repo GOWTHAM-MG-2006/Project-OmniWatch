@@ -30,6 +30,9 @@ WORKDIR /app
 # -- Copy service code (full dashboard/ package for module import) --
 COPY dashboard/ ./dashboard/
 
+# -- Copy identity package (needed by workspace_scope.py for JWT decode) --
+COPY identity/ ./identity/
+
 # -- Ensure dashboard package is on Python path --
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
