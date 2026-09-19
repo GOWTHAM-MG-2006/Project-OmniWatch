@@ -37,6 +37,23 @@ try:  # Docker: uvicorn dashboard.api.main:app from /app (PYTHONPATH=/app)
 except ImportError:  # Local dev: uvicorn main:app from dashboard/api/
     from model_manager import ModelManager, ModelProvider, ModelSettings, sse_response
 
+try:  # Docker: workspace scope enforcement (ENTRY-5)
+    from dashboard.api.workspace_scope import (
+        ScopeError,
+        get_current_scope,
+        reset_current_scope,
+        resolve_request_scope,
+        set_current_scope,
+    )
+except ImportError:  # Local dev: uvicorn main:app from dashboard/api/
+    from workspace_scope import (
+        ScopeError,
+        get_current_scope,
+        reset_current_scope,
+        resolve_request_scope,
+        set_current_scope,
+    )
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -268,6 +285,7 @@ def _close_clients() -> None:
 def _safe_ch_query(query: str, parameters: dict | None = None) -> list[dict]:
     """Execute ClickHouse query with graceful fallback on error."""
     try:
+        query = _scoped_ch_query(query)  # ENTRY-5: per-workspace DB injection
         client = _get_ch_client()
         result = client.query(query, parameters=parameters or {})
         columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
@@ -298,6 +316,7 @@ def _safe_neo4j_query(query: str, parameters: dict | None = None) -> list[dict]:
 def _safe_minio_list(bucket: str, prefix: str = "") -> list[str]:
     """List MinIO objects with graceful fallback on error."""
     try:
+        prefix = _scoped_prefix(prefix)  # ENTRY-5: workspaces/<slug>/ injection
         client = _get_minio_client()
         return [obj.object_name for obj in client.list_objects(bucket, prefix=prefix)]
     except Exception as exc:  # noqa: BLE001
@@ -308,6 +327,7 @@ def _safe_minio_list(bucket: str, prefix: str = "") -> list[str]:
 def _safe_minio_get(bucket: str, object_name: str) -> bytes | None:
     """Download MinIO object with graceful fallback on error."""
     try:
+        object_name = _scoped_key(object_name)  # ENTRY-5: workspace prefix
         client = _get_minio_client()
         return client.get_object(bucket, object_name).read()
     except Exception as exc:  # noqa: BLE001
@@ -318,6 +338,7 @@ def _safe_minio_get(bucket: str, object_name: str) -> bytes | None:
 def _safe_minio_put(bucket: str, object_name: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
     """Upload data to MinIO with graceful fallback. Returns True on success."""
     try:
+        object_name = _scoped_key(object_name)  # ENTRY-5: workspace prefix
         client = _get_minio_client()
         from io import BytesIO
         client.put_object(bucket, object_name, BytesIO(data), len(data), content_type=content_type)
@@ -329,6 +350,72 @@ def _safe_minio_put(bucket: str, object_name: str, data: bytes, content_type: st
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Workspace scope injection (ENTRY-5 — docs/workspace-isolation.md section 1).
+# Scope comes from the per-request ContextVar pinned by the middleware below.
+# Default scope is the identity mapping (bare names) so legacy unauthenticated
+# behavior is byte-identical; non-default scopes narrow every query path.
+# ---------------------------------------------------------------------------
+
+def _scoped_ch_query(query: str) -> str:
+    """Rewrite the shared `omniwatch.` DB qualifier to the request scope DB.
+
+    Default scope -> `omniwatch` (string untouched). Non-default ->
+    backtick-quoted `omniwatch_ws_<slug>` (slugs allow hyphens, illegal in
+    bare ClickHouse identifiers — ENTRY-2 hyphen lesson).
+    """
+    db = get_current_scope().ch_database
+    if db == "omniwatch":
+        return query
+    return query.replace("omniwatch.", f"`{db}`.")
+
+
+def _scoped_prefix(prefix: str) -> str:
+    """Prepend the workspace MinIO prefix (default scope: identity, no-op)."""
+    ws_prefix = get_current_scope().minio_prefix
+    if not ws_prefix or prefix.startswith(ws_prefix):
+        return prefix
+    return f"{ws_prefix}{prefix}"
+
+
+def _scoped_key(key: str) -> str:
+    """Prepend the workspace MinIO prefix to an object key (no double-prefix)."""
+    return _scoped_prefix(key)
+
+
+def _ws_where(*aliases: str) -> str:
+    """Neo4j scoping WHERE clause (default scope: empty, legacy-identical).
+
+    Non-default: every listed alias must BELONG_TO the request's :Workspace
+    node (contract: entity nodes carry BELONGS_TO edges; legacy nodes without
+    one read as `default`).
+    """
+    if get_current_scope().is_default or not aliases:
+        return ""
+    preds = " AND ".join(
+        f"({a})-[:BELONGS_TO]->(:Workspace {{slug: $ws_slug}})" for a in aliases
+    )
+    return f"WHERE {preds}"
+
+
+def _ws_and(*aliases: str) -> str:
+    """Neo4j scoping predicate for queries that already have WHERE."""
+    if get_current_scope().is_default or not aliases:
+        return ""
+    preds = " AND ".join(
+        f"({a})-[:BELONGS_TO]->(:Workspace {{slug: $ws_slug}})" for a in aliases
+    )
+    return f"AND {preds}"
+
+
+def _ws_params(params: dict | None = None) -> dict:
+    """Merge the $ws_slug parameter (default scope: params untouched)."""
+    out = dict(params or {})
+    if not get_current_scope().is_default:
+        out["ws_slug"] = get_current_scope().slug
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -402,11 +489,59 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ----- workspace scope middleware (ENTRY-5) -----
+
+    @app.middleware("http")
+    async def workspace_scope_middleware(request, call_next):
+        """Resolve (user_id, workspace_id) on every /api/* route.
+
+        No token -> default scope (legacy single-tenant, byte-identical).
+        Present-but-bad token -> 401; non-member/unknown workspace -> 403
+        (never 404-leak); malformed ?workspace_id= -> 422. Non-/api/ paths
+        (/, /health, /docs) bypass scoping entirely.
+        """
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        try:
+            params = request.query_params
+            override = (
+                params.get("workspace_id") if "workspace_id" in params else None
+            )
+            scope = resolve_request_scope(
+                request.headers.get("authorization"),
+                override,
+            )
+        except ScopeError as exc:
+            return JSONResponse(
+                status_code=exc.status_code, content={"error": exc.detail}
+            )
+        token = set_current_scope(scope)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_current_scope(token)
+        response.headers["X-Workspace-Scope"] = scope.slug
+        return response
+
     # ----- root health -----
 
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok", "service": "dashboard-api", "timestamp": _now_iso()}
+
+    # ----- workspace scope introspection (ENTRY-5, additive) -----
+
+    @app.get("/api/scope")
+    async def api_scope() -> dict:
+        """Return the resolved workspace scope for this request.
+
+        Reports the JWT-derived (user_id, workspace_id) plus the isolation
+        keys (ClickHouse DB, Kafka topics, MinIO prefix, Neo4j workspace).
+        Membership was already enforced by the middleware (non-member -> 403
+        before reaching here), so this doubles as the URL-tamper probe:
+        /api/scope?workspace_id=<other> -> 403 unless owned-and-live.
+        """
+        return get_current_scope().to_dict()
 
     # ----- summary / overview -----
 
@@ -639,11 +774,11 @@ def create_app() -> FastAPI:
     @app.get("/api/topology")
     async def api_topology() -> dict:
         """Return Neo4j graph as React Flow nodes + edges."""
-        nodes_query = "MATCH (n) RETURN n.id AS id, n.name AS label, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score"
-        nodes_raw = _safe_neo4j_query(nodes_query)
+        nodes_query = f"MATCH (n) {_ws_where('n')} RETURN n.id AS id, n.name AS label, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score"
+        nodes_raw = _safe_neo4j_query(nodes_query, parameters=_ws_params())
 
-        edges_query = "MATCH (a)-[r]->(b) RETURN a.id AS source, b.id AS target, type(r) AS label, r.latency_p50 AS latency_p50, r.error_rate AS error_rate"
-        edges_raw = _safe_neo4j_query(edges_query)
+        edges_query = f"MATCH (a)-[r]->(b) {_ws_where('a', 'b')} RETURN a.id AS source, b.id AS target, type(r) AS label, r.latency_p50 AS latency_p50, r.error_rate AS error_rate"
+        edges_raw = _safe_neo4j_query(edges_query, parameters=_ws_params())
 
         # Position nodes in a simple circle layout
         node_count = len(nodes_raw)
@@ -682,28 +817,28 @@ def create_app() -> FastAPI:
     @app.get("/api/entities")
     async def api_entities() -> dict:
         """Return all entities from Neo4j."""
-        query = "MATCH (n) RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score, n.last_seen AS last_seen ORDER BY n.anomaly_score DESC"
-        rows = _safe_neo4j_query(query)
+        query = f"MATCH (n) {_ws_where('n')} RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score, n.last_seen AS last_seen ORDER BY n.anomaly_score DESC"
+        rows = _safe_neo4j_query(query, parameters=_ws_params())
         return {"entities": rows, "count": len(rows), "timestamp": _now_iso()}
 
     @app.get("/api/entities/top")
     async def api_entities_top(limit: int = Query(10, ge=1, le=100)) -> dict:
         """Return top entities by anomaly score."""
-        query = "MATCH (n) WHERE n.anomaly_score IS NOT NULL RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.anomaly_score AS anomaly_score ORDER BY n.anomaly_score DESC LIMIT %(limit)s"
-        rows = _safe_neo4j_query(query, parameters={"limit": limit})
+        query = f"MATCH (n) WHERE n.anomaly_score IS NOT NULL {_ws_and('n')} RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.anomaly_score AS anomaly_score ORDER BY n.anomaly_score DESC LIMIT %(limit)s"
+        rows = _safe_neo4j_query(query, parameters=_ws_params({"limit": limit}))
         return {"entities": rows, "count": len(rows), "timestamp": _now_iso()}
 
     @app.get("/api/entity/{entity_id}", response_model=None)
     async def api_entity_detail(entity_id: str):
         """Return details for a specific entity from Neo4j."""
-        query = "MATCH (n {id: $eid}) RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score, n.last_seen AS last_seen"
-        rows = _safe_neo4j_query(query, parameters={"eid": entity_id})
+        query = f"MATCH (n {{id: $eid}}) {_ws_where('n')} RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score, n.last_seen AS last_seen"
+        rows = _safe_neo4j_query(query, parameters=_ws_params({"eid": entity_id}))
         if not rows:
             return JSONResponse(status_code=404, content={"error": "entity not found", "entity_id": entity_id})
 
         # Get connected entities
-        neighbors_query = "MATCH (n {id: $eid})-[r]-(m) RETURN m.id AS id, m.name AS name, type(r) AS rel_type, labels(m) AS labels"
-        neighbors = _safe_neo4j_query(neighbors_query, parameters={"eid": entity_id})
+        neighbors_query = f"MATCH (n {{id: $eid}})-[r]-(m) {_ws_where('m')} RETURN m.id AS id, m.name AS name, type(r) AS rel_type, labels(m) AS labels"
+        neighbors = _safe_neo4j_query(neighbors_query, parameters=_ws_params({"eid": entity_id}))
 
         return {"entity": rows[0], "neighbors": neighbors, "timestamp": _now_iso()}
 
@@ -858,7 +993,7 @@ def create_app() -> FastAPI:
             objs: list[dict] = []
             has_more = False
             idx = 0
-            for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
+            for obj in client.list_objects(bucket, prefix=_scoped_prefix(prefix), recursive=True):
                 if idx < offset:
                     idx += 1
                     continue
@@ -956,7 +1091,7 @@ def create_app() -> FastAPI:
             content = await file.read()
             client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             from io import BytesIO
-            client.put_object(bucket, key, BytesIO(content), len(content), content_type=file.content_type or "application/octet-stream")
+            client.put_object(bucket, _scoped_key(key), BytesIO(content), len(content), content_type=file.content_type or "application/octet-stream")
             return {"bucket": bucket, "key": key, "size": len(content), "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
@@ -981,8 +1116,8 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
             client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
-            stat = client.stat_object(bucket, key)
-            response = client.get_object(bucket, key)
+            stat = client.stat_object(bucket, _scoped_key(key))
+            response = client.get_object(bucket, _scoped_key(key))
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO download failed bucket=%s key=%s: %s", bucket, key, msg)
@@ -1025,7 +1160,7 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=422, content={"error": "bucket and key are required"})
         try:
             client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
-            client.remove_object(bucket, key)
+            client.remove_object(bucket, _scoped_key(key))
             return {"deleted": True, "bucket": bucket, "key": key, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
@@ -1076,7 +1211,7 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
             client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
-            stat = client.stat_object(bucket, key)
+            stat = client.stat_object(bucket, _scoped_key(key))
             lm = getattr(stat, "last_modified", None)
             return {
                 "bucket": bucket,
@@ -1390,8 +1525,8 @@ def create_app() -> FastAPI:
     @app.get("/api/dashboard/entity-health")
     async def api_entity_health() -> dict:
         """Return entity anomaly scores from Neo4j for health heatmap."""
-        query = "MATCH (n) WHERE n.anomaly_score IS NOT NULL RETURN n.id AS id, n.name AS name, n.anomaly_score AS anomaly_score, n.status AS status ORDER BY n.anomaly_score DESC"
-        rows = _safe_neo4j_query(query)
+        query = f"MATCH (n) WHERE n.anomaly_score IS NOT NULL {_ws_and('n')} RETURN n.id AS id, n.name AS name, n.anomaly_score AS anomaly_score, n.status AS status ORDER BY n.anomaly_score DESC"
+        rows = _safe_neo4j_query(query, parameters=_ws_params())
         return {"entities": rows, "count": len(rows), "timestamp": _now_iso()}
 
     @app.get("/api/dashboard/incidents-timeline")
@@ -1500,14 +1635,14 @@ def create_app() -> FastAPI:
     @app.get("/api/topology/{entity_id}", response_model=None)
     async def api_topology_entity(entity_id: str):
         """Return entity-scoped topology subgraph from Neo4j."""
-        center_query = "MATCH (n {id: $eid}) RETURN n.id AS id, n.name AS label, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score"
-        center_raw = _safe_neo4j_query(center_query, parameters={"eid": entity_id})
+        center_query = f"MATCH (n {{id: $eid}}) {_ws_where('n')} RETURN n.id AS id, n.name AS label, labels(n) AS labels, n.type AS entity_type, n.criticality AS criticality, n.status AS status, n.anomaly_score AS anomaly_score"
+        center_raw = _safe_neo4j_query(center_query, parameters=_ws_params({"eid": entity_id}))
 
         if not center_raw:
             return JSONResponse(status_code=404, content={"error": "entity not found", "entity_id": entity_id})
 
-        neighbors_query = "MATCH (n {id: $eid})-[r]-(m) RETURN m.id AS id, m.name AS label, labels(m) AS labels, m.type AS entity_type, m.criticality AS criticality, m.status AS status, m.anomaly_score AS anomaly_score, type(r) AS rel_type, r.latency_p50 AS latency_p50, r.error_rate AS error_rate"
-        neighbors_raw = _safe_neo4j_query(neighbors_query, parameters={"eid": entity_id})
+        neighbors_query = f"MATCH (n {{id: $eid}})-[r]-(m) {_ws_where('m')} RETURN m.id AS id, m.name AS label, labels(m) AS labels, m.type AS entity_type, m.criticality AS criticality, m.status AS status, m.anomaly_score AS anomaly_score, type(r) AS rel_type, r.latency_p50 AS latency_p50, r.error_rate AS error_rate"
+        neighbors_raw = _safe_neo4j_query(neighbors_query, parameters=_ws_params({"eid": entity_id}))
 
         node_ids: set[str] = {center_raw[0].get("id", "")}
         nodes: list[dict] = [
