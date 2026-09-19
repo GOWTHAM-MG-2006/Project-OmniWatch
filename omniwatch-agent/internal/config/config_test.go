@@ -237,8 +237,8 @@ func TestLoadK8sReceivers(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	// DYN-goagent: reconciled to the compiled Go defaults (yaml == Default()).
-	if cfg.Receiver.K8sObjects.CollectionInterval != 15*time.Minute {
-		t.Errorf("k8s_objects interval = %v, want 15m", cfg.Receiver.K8sObjects.CollectionInterval)
+	if cfg.Receiver.K8sObjects.CollectionInterval != 3*time.Minute {
+		t.Errorf("k8s_objects interval = %v, want 3m", cfg.Receiver.K8sObjects.CollectionInterval)
 	}
 	if cfg.Receiver.K8sObjects.Mode != "pull" {
 		t.Errorf("k8s_objects mode = %q, want pull", cfg.Receiver.K8sObjects.Mode)
@@ -269,8 +269,8 @@ func TestLoadK8sReceivers(t *testing.T) {
 		}
 	}
 	// DYN-goagent: reconciled to the compiled Go defaults (yaml == Default()).
-	if cfg.Receiver.K8sCluster.CollectionInterval != 10*time.Minute {
-		t.Errorf("k8s_cluster interval = %v, want 10m", cfg.Receiver.K8sCluster.CollectionInterval)
+	if cfg.Receiver.K8sCluster.CollectionInterval != 3*time.Minute {
+		t.Errorf("k8s_cluster interval = %v, want 3m", cfg.Receiver.K8sCluster.CollectionInterval)
 	}
 	wantConditions := []string{"Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"}
 	if len(cfg.Receiver.K8sCluster.NodeConditionsToReport) != len(wantConditions) {

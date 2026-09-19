@@ -281,7 +281,7 @@ receiver:
         severity:
           parse_from: attributes.level
   k8s_objects:
-    collection_interval: 15m
+    collection_interval: 3m
     mode: pull
     objects:
       - name: pods
@@ -294,7 +294,7 @@ receiver:
       - name: daemonsets
       - name: statefulsets
   k8s_cluster:
-    collection_interval: 10m
+    collection_interval: 3m
     node_conditions_to_report:
       - Ready
       - MemoryPressure
@@ -318,11 +318,11 @@ All overrides use the `OMNIWATCH_` prefix. Set these to override YAML values wit
 | `OMNIWATCH_AGENT_LOG_LEVEL` | string | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `OMNIWATCH_RECEIVER_HOSTMETRICS_COLLECTION_INTERVAL` | duration | `60s` | Host metrics collection interval |
 | `OMNIWATCH_RECEIVER_FILELOG_INCLUDE` | comma-list | (see YAML) | Log file glob patterns |
-| `OMNIWATCH_RECEIVER_K8S_OBJECTS_COLLECTION_INTERVAL` | duration | `15m` | K8s object polling interval |
+| `OMNIWATCH_RECEIVER_K8S_OBJECTS_COLLECTION_INTERVAL` | duration | `3m` | K8s object polling interval |
 | `OMNIWATCH_RECEIVER_K8S_OBJECTS_MODE` | string | `pull` | K8s objects mode (`pull` or `watch`) |
 | `OMNIWATCH_RECEIVER_K8S_OBJECTS_LABEL_SELECTOR` | string | (empty) | K8s label selector filter |
 | `OMNIWATCH_RECEIVER_K8S_OBJECTS_FIELD_SELECTOR` | string | (empty) | K8s field selector filter |
-| `OMNIWATCH_RECEIVER_K8S_CLUSTER_COLLECTION_INTERVAL` | duration | `10m` | K8s cluster receiver interval |
+| `OMNIWATCH_RECEIVER_K8S_CLUSTER_COLLECTION_INTERVAL` | duration | `3m` | K8s cluster receiver interval |
 | `OMNIWATCH_RECEIVER_K8S_CLUSTER_NODE_CONDITIONS_TO_REPORT` | comma-list | `Ready,MemoryPressure,...` | Node conditions to report |
 | `OMNIWATCH_EXPORTER_OTLP_ENDPOINT` | string | `otel-collector:4317` | OTLP gRPC endpoint |
 | `OMNIWATCH_EXPORTER_OTLP_INSECURE` | bool | `true` | Skip TLS for OTLP gRPC |

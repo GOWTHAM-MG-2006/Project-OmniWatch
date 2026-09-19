@@ -238,11 +238,11 @@ func Default() *Config {
 			Severity:  &FilelogOperatorField{ParseFrom: "attributes.level"},
 		},
 	}
-	c.Receiver.K8sObjects.CollectionInterval = 15 * time.Minute
+	c.Receiver.K8sObjects.CollectionInterval = 3 * time.Minute
 	c.Receiver.K8sObjects.Mode = "pull"
 	c.Receiver.K8sObjects.LabelSelector = ""
 	c.Receiver.K8sObjects.FieldSelector = ""
-	c.Receiver.K8sCluster.CollectionInterval = 10 * time.Minute
+	c.Receiver.K8sCluster.CollectionInterval = 3 * time.Minute
 	c.Receiver.K8sCluster.NodeConditionsToReport = []string{
 		"Ready",
 		"MemoryPressure",
