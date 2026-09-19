@@ -643,9 +643,6 @@ export function ModelSettings() {
                   {showApiKey ? 'Hide' : 'Show'}
                 </button>
               </div>
-              <span className="text-[10px] font-mono text-[#52525b] leading-relaxed">
-                For <span className="text-[#00d4ff]">:cloud</span> models run <span className="text-[#e2e2e5]">docker exec -it omniwatch-ollama ollama signin</span> once, or paste your key here. Local models (e.g. <span className="text-[#e2e2e5]">qwen3:8b</span>) don&apos;t need it.
-              </span>
             </div>
 
             {/* Temperature */}

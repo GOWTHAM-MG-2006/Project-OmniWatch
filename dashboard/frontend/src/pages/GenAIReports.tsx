@@ -8,7 +8,6 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useFetch } from '../hooks/useFetch'
 import api from '../api/client'
 
 interface ModelSettings {
@@ -39,15 +38,22 @@ const REPORT_ICONS: Record<string, string> = {
 }
 
 function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
-  const { data, loading, error, refetch } = useFetch<GenAIReport>(
-    async () => {
-      // GenAI backend calls Ollama qwen3:8b — cold model load + 4-way
-      // concurrency can take ~30s, so allow 60s here (nginx allows 90s).
+  const [data, setData] = useState<GenAIReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const generateReport = async () => {
+    setLoading(true)
+    setError(null)
+    try {
       const { data } = await api.get<GenAIReport>(endpoint, { timeout: 60_000 })
-      return data
-    },
-    [endpoint],
-  )
+      setData(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate report')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const isEmpty = data?.source === 'empty'
 
@@ -79,14 +85,22 @@ function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
             <div className="h-3 w-2/3 rounded bg-[#2a2a2a] animate-pulse" />
             <div className="flex items-center justify-center gap-2 text-[#a1a1aa] text-sm mt-4">
               <div className="w-5 h-5 rounded-full border-2 border-[#00d4ff] border-t-transparent animate-spin" />
-              <span className="font-mono text-xs">Loading live report...</span>
+              <span className="font-mono text-xs">Generating report...</span>
             </div>
           </div>
         ) : error ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-sm font-mono">
             <span className="text-[#ef4444]">{error}</span>
-            <button onClick={refetch} className="px-3 py-1 rounded bg-[#00d4ff] text-black text-xs font-semibold hover:bg-[#00b8db] transition-colors">Retry</button>
+            <button onClick={generateReport} className="px-3 py-1 rounded bg-[#00d4ff] text-black text-xs font-semibold hover:bg-[#00b8db] transition-colors">Retry</button>
             <span className="text-[10px] text-[#a1a1aa]">GET {endpoint} → live ClickHouse/MinIO/Ollama</span>
+          </div>
+        ) : !data ? (
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-center p-2">
+            <span className="text-[#eab308] text-xs font-mono">No report generated yet</span>
+            <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px] w-full text-center">
+              {'Click "Create Report" to generate a new report.'}
+            </pre>
+            <button onClick={generateReport} className="mt-1 px-3 py-1 rounded bg-[#00d4ff] text-black text-xs font-semibold hover:bg-[#00b8db] transition-colors">Create Report</button>
           </div>
         ) : isEmpty ? (
           <div className="h-full flex flex-col items-center justify-center gap-2 text-center p-2">
@@ -94,12 +108,15 @@ function ReportCard({ title, endpoint }: { title: string; endpoint: string }) {
             <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px] w-full text-left">
               {data?.content ?? 'No incidents recorded yet — run `python simulation/anomaly_injector.py --scenario database_cascade` to seed ClickHouse.'}
             </pre>
-            <button onClick={refetch} className="mt-1 px-3 py-1 rounded border border-[#eab308] text-[#eab308] text-xs font-mono hover:bg-[rgba(234,179,8,0.1)] transition-colors">Retry</button>
+            <button onClick={generateReport} className="mt-1 px-3 py-1 rounded border border-[#eab308] text-[#eab308] text-xs font-mono hover:bg-[rgba(234,179,8,0.1)] transition-colors">Create Report</button>
           </div>
         ) : (
-          <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px]">
-            {data?.content ?? 'No content available'}
-          </pre>
+          <>
+            <pre className="text-xs text-[#a1a1aa] whitespace-pre-wrap font-mono leading-relaxed overflow-auto max-h-[200px]">
+              {data?.content ?? 'No content available'}
+            </pre>
+            <button onClick={generateReport} className="mt-2 px-3 py-1 rounded bg-[#00d4ff] text-black text-xs font-semibold hover:bg-[#00b8db] transition-colors">Regenerate Report</button>
+          </>
         )}
       </div>
     </div>
