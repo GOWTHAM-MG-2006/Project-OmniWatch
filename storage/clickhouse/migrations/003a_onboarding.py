@@ -40,25 +40,25 @@ _BASE_DELAY = 0.1
 _MAX_DELAY = 2.0
 
 STATEMENTS: List[str] = [
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_app_name String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_app_type String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_cloud_provider String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_endpoints Array(String) DEFAULT []",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_expected_eps String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_log_volume String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_retention_days UInt32 DEFAULT 0",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_alert_contact String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_config_json String DEFAULT ''",
-    "ALTER TABLE IF EXISTS workspaces ADD COLUMN IF NOT EXISTS "
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS "
     "onboarding_updated_at DateTime DEFAULT now()",
 ]
 
