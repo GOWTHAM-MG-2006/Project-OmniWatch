@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity
+  namespace: omniwatch
+  labels:
+    app: identity
+    tier: backend
+    phase: "entry-point"
+spec:
+  # replicas: 1 — the dev/memory store backend is per-pod state; scale past 1
+  # only with OMNIWATCH_IDENTITY_STORE=clickhouse (migration 002 applied).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identity
+  template:
+    metadata:
+      labels:
+        app: identity
+        tier: backend
+        phase: "entry-point"
+    spec:
+      containers:
+        - name: omniwatch-identity
+          image: omniwatch/identity:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8012
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: identity-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8012
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8012
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

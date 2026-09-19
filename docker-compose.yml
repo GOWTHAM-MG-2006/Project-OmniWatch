@@ -734,6 +734,43 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # Identity Service — entry-point auth (register/login/JWT, port 8012)
+  # ---------------------------------------------------------------------------
+  identity:
+    build:
+      context: .
+      dockerfile: identity/Dockerfile
+    container_name: omniwatch-identity
+    networks:
+      - omniwatch-network
+    ports:
+      - "${OMNIWATCH_IDENTITY_PORT:-8012}:8012"
+    environment:
+      OMNIWATCH_ENV: ${OMNIWATCH_ENV:-dev}
+      # JWT secret is env-only, NEVER committed: empty default keeps local dev
+      # booting (dev default + WARN); OMNIWATCH_ENV=prod without it fail-fasts.
+      OMNIWATCH_JWT_SECRET: ${OMNIWATCH_JWT_SECRET:-}
+      OMNIWATCH_JWT_TTL_S: ${OMNIWATCH_JWT_TTL_S:-3600}
+      OMNIWATCH_JWT_REFRESH_TTL_S: ${OMNIWATCH_JWT_REFRESH_TTL_S:-86400}
+      OMNIWATCH_IDENTITY_PORT: ${OMNIWATCH_IDENTITY_PORT:-8012}
+      OMNIWATCH_IDENTITY_STORE: ${OMNIWATCH_IDENTITY_STORE:-memory}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-omniwatch}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-omniwatch}
+    depends_on:
+      clickhouse:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
   # Beyla — eBPF auto-instrumentation sidecar (Phase 1)
   # ---------------------------------------------------------------------------
   beyla:
