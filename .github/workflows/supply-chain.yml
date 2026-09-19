@@ -14,19 +14,17 @@ permissions:
   packages: write # push image to GHCR
   id-token: write # keyless cosign OIDC
 
-env:
-  IMAGE: ghcr.io/${{ env.OWNER_LC }}/omniwatch-agent:${{ github.ref_name }}
-
 jobs:
   build-sbom-sign:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Lowercase owner for GHCR
-        env:
-          OWNER: ${{ github.repository_owner }}
-        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+      - name: Set lowercase GHCR image
+        run: |
+          OWNER=${{ github.repository_owner }}
+          echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${OWNER,,}/omniwatch-agent:${{ github.ref_name }}" >> "$GITHUB_ENV"
 
       - name: Set SOURCE_DATE_EPOCH from last commit
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
@@ -40,10 +38,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build reproducible image
-        run: make build-reproducible IMAGE="$IMAGE" SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
+        run: make build-reproducible IMAGE="${{ env.IMAGE }}" SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
 
       - name: Push image
-        run: docker push "$IMAGE"
+        run: docker push "${{ env.IMAGE }}"
 
       - name: Generate SBOM (SPDX 2.3)
         uses: anchore/sbom-action@v0
@@ -58,10 +56,10 @@ jobs:
       - uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless OIDC)
-        run: cosign sign --yes "$IMAGE"
+        run: cosign sign --yes "${{ env.IMAGE }}"
 
       - name: Verify signature (keyless)
-        run: cosign verify "$IMAGE"
+        run: cosign verify "${{ env.IMAGE }}"
 
       - name: Attach SBOM to release
         uses: softprops/action-gh-release@v2
