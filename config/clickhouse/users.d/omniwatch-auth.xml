@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OmniWatch — ClickHouse local auth (docker-compose scope only).
+
+  Closes the local-vs-prod gap: the compose image (clickhouse/clickhouse-server:23.8)
+  boots passwordless by default while prod fail-fasts on an empty password.
+  This snippet is mounted at /etc/clickhouse-server/users.d/ and merges over the
+  image's stock users.xml (users.d merge semantics: only the elements present
+  here override; everything else keeps the stock defaults).
+
+  - User `omniwatch`: password from dev secret, reachable from any host
+    (<ip>::/0</ip> covers IPv4+IPv6 inside the compose network), default
+    profile/quota, <access_management>1</access_management> so it holds full
+    admin rights (unrestricted DDL/DML/SHOW on the `omniwatch` DB and the
+    `system` tables clients query — SHOW TABLES, SELECT count(*),
+    CREATE TABLE IF NOT EXISTS, ALTER TABLE ... UPDATE).
+  - User `default`: password overridden to the SAME dev secret (uniform secret —
+    no passwordless backdoor account left open). Its stock networks/profile/quota
+    are untouched (merge keeps them).
+
+  NOTE: takes effect only on a fresh ClickHouse data volume. The existing local
+  `clickhouse-data` volume keeps the old passwordless state until the reset
+  worker recreates it (bind-mount edits need force-recreate on next up).
+-->
+<clickhouse>
+  <users>
+    <omniwatch>
+      <password>omniwatch</password>
+      <networks>
+        <ip>::/0</ip>
+      </networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <access_management>1</access_management>
+    </omniwatch>
+    <default>
+      <password>omniwatch</password>
+    </default>
+  </users>
+</clickhouse>

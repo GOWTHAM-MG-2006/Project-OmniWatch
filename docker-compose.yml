@@ -66,9 +66,11 @@ services:
       - "8123:8123"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - ./config/clickhouse/users.d/omniwatch-auth.xml:/etc/clickhouse-server/users.d/omniwatch-auth.xml:ro
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-omniwatch}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-omniwatch}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ulimits:
       nofile:
@@ -102,7 +104,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: omniwatch-minio
     networks:
       - omniwatch-network
@@ -263,7 +265,7 @@ services:
   # MinIO Bucket Init — creates required buckets before Flink starts
   # ---------------------------------------------------------------------------
   minio-bucket-init:
-    image: minio/mc:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/mc:latest
     container_name: omniwatch-minio-init
     networks:
       - omniwatch-network
