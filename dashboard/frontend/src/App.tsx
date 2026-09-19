@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
 import { LandingRoute, RequireAuth, RequireWorkspace } from './components/RequireAuth'
@@ -54,32 +54,12 @@ function DashboardShell() {
   )
 }
 
-function EntryShell() {
+function EntryShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
       <TopBar />
       <main className="flex-1 overflow-y-auto">
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/workspaces"
-            element={
-              <RequireAuth>
-                <Workspaces />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/workspaces/:id/onboarding"
-            element={
-              <RequireAuth>
-                <WorkspaceOnboarding />
-              </RequireAuth>
-            }
-          />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        {children}
       </main>
     </div>
   )
@@ -89,9 +69,28 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<EntryShell />} />
-        <Route path="/register" element={<EntryShell />} />
-        <Route path="/workspaces/*" element={<EntryShell />} />
+        <Route path="/login" element={<EntryShell><Login /></EntryShell>} />
+        <Route path="/register" element={<EntryShell><Register /></EntryShell>} />
+        <Route
+          path="/workspaces"
+          element={
+            <EntryShell>
+              <RequireAuth>
+                <Workspaces />
+              </RequireAuth>
+            </EntryShell>
+          }
+        />
+        <Route
+          path="/workspaces/:id/onboarding"
+          element={
+            <EntryShell>
+              <RequireAuth>
+                <WorkspaceOnboarding />
+              </RequireAuth>
+            </EntryShell>
+          }
+        />
         <Route path="/*" element={<DashboardShell />} />
       </Routes>
     </BrowserRouter>
