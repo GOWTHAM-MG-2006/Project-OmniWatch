@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -111,6 +112,8 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
     private final String host;
     private final int port;
     private final String database;
+    private final String user;
+    private final String password;
 
     // ---- Transient runtime state (initialized in open) ----
 
@@ -131,16 +134,26 @@ public class FeatureStoreWriter extends RichSinkFunction<FeatureVector> {
     static final AtomicLong droppedBatches = new AtomicLong(0);
 
     public FeatureStoreWriter(String host, int port, String database) {
+        this(host, port, database, "omniwatch", "omniwatch");
+    }
+
+    public FeatureStoreWriter(String host, int port, String database,
+                              String user, String password) {
         this.host = host;
         this.port = port;
         this.database = database;
+        this.user = user;
+        this.password = password;
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
         String url = "jdbc:clickhouse://" + host + ":" + port + "/" + database;
-        LOG.info("Connecting to ClickHouse: {}", url);
-        connection = DriverManager.getConnection(url);
+        LOG.info("Connecting to ClickHouse: {} as user {}", url, user);
+        Properties props = new Properties();
+        props.setProperty("user", user);
+        props.setProperty("password", password);
+        connection = DriverManager.getConnection(url, props);
         buffer = new ArrayList<>(BATCH_SIZE);
         lastFlushMs = System.currentTimeMillis();
         closed = false;

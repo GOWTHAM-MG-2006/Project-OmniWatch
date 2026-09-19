@@ -202,7 +202,8 @@ public final class FeatureStoreJob {
         // Sink FeatureVectors to ClickHouse
         featureVectors
                 .addSink(new FeatureStoreWriter(
-                        config.clickhouseHost, config.clickhousePort, config.clickhouseDb))
+                        config.clickhouseHost, config.clickhousePort, config.clickhouseDb,
+                        config.clickhouseUser, config.clickhousePassword))
                 .name("sink-feature-vectors-clickhouse");
 
         LOG.info("Feature store job graph built: {} -> windowed sinks | windowed sources -> "
@@ -410,15 +411,20 @@ public final class FeatureStoreJob {
         final String clickhouseHost;
         final int clickhousePort;
         final String clickhouseDb;
+        final String clickhouseUser;
+        final String clickhousePassword;
 
         private JobConfig(String kafkaBrokers, String kafkaGroupId,
                           String clickhouseHost, int clickhousePort,
-                          String clickhouseDb) {
+                          String clickhouseDb, String clickhouseUser,
+                          String clickhousePassword) {
             this.kafkaBrokers = kafkaBrokers;
             this.kafkaGroupId = kafkaGroupId;
             this.clickhouseHost = clickhouseHost;
             this.clickhousePort = clickhousePort;
             this.clickhouseDb = clickhouseDb;
+            this.clickhouseUser = clickhouseUser;
+            this.clickhousePassword = clickhousePassword;
         }
 
         static JobConfig fromArgs(String[] args) {
@@ -434,7 +440,11 @@ public final class FeatureStoreJob {
                     System.getenv().getOrDefault("CLICKHOUSE_PORT", "8123")));
             String chDb = params.get("clickhouse.db",
                     System.getenv().getOrDefault("CLICKHOUSE_DB", "omniwatch"));
-            return new JobConfig(brokers, groupId, chHost, chPort, chDb);
+            String chUser = params.get("clickhouse.user",
+                    System.getenv().getOrDefault("CLICKHOUSE_USER", "omniwatch"));
+            String chPassword = params.get("clickhouse.password",
+                    System.getenv().getOrDefault("CLICKHOUSE_PASSWORD", "omniwatch"));
+            return new JobConfig(brokers, groupId, chHost, chPort, chDb, chUser, chPassword);
         }
     }
 }

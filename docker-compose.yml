@@ -304,6 +304,8 @@ services:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-omniwatch}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-omniwatch}
     depends_on:
       kafka:
         condition: service_healthy

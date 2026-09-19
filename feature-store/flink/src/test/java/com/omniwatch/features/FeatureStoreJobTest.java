@@ -63,13 +63,17 @@ class FeatureStoreJobTest {
                         "--kafka.group.id", "test-group",
                         "--clickhouse.host", "ch-local",
                         "--clickhouse.port", "9000",
-                        "--clickhouse.db", "testdb"
+                        "--clickhouse.db", "testdb",
+                        "--clickhouse.user", "ch-user",
+                        "--clickhouse.password", "ch-pass"
                 });
         assertEquals("localhost:9092", cfg.kafkaBrokers);
         assertEquals("test-group", cfg.kafkaGroupId);
         assertEquals("ch-local", cfg.clickhouseHost);
         assertEquals(9000, cfg.clickhousePort);
         assertEquals("testdb", cfg.clickhouseDb);
+        assertEquals("ch-user", cfg.clickhouseUser);
+        assertEquals("ch-pass", cfg.clickhousePassword);
     }
 
     @Test
@@ -82,6 +86,10 @@ class FeatureStoreJobTest {
         assertEquals(8123, cfg.clickhousePort);
         assertNotNull(cfg.clickhouseDb);
         assertEquals("omniwatch", cfg.clickhouseDb);
+        assertNotNull(cfg.clickhouseUser);
+        assertEquals("omniwatch", cfg.clickhouseUser);
+        assertNotNull(cfg.clickhousePassword);
+        assertEquals("omniwatch", cfg.clickhousePassword);
     }
 
     @Test
