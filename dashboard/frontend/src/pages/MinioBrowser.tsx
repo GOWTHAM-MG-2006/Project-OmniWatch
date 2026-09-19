@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchMinioBuckets, fetchMinioObjects, minioUpload, minioDownload, minioDeleteObject, minioDeleteBucket, minioCreateBucket } from '../api/client'
+import { useState, useCallback, useRef } from 'react'
+import { fetchMinioBuckets, fetchMinioObjects, minioUpload, minioDownload, minioDeleteObject, minioDeleteBucket, minioCreateBucket, apiError } from '../api/client'
 import type { MinioBucket, MinioObject } from '../api/client'
 import { AuthGate } from '../components/AuthGate'
 
@@ -54,16 +54,12 @@ export function MinioBrowser() {
         setBuckets(res.buckets)
       }
     } catch (e) {
-      setBucketsError(e instanceof Error ? e.message : 'Failed to load buckets')
+      setBucketsError(apiError(e, 'Failed to load buckets'))
       setBuckets([])
     } finally {
       setBucketsLoading(false)
     }
   }, [])
-
-  useEffect(() => {
-    loadBuckets()
-  }, [loadBuckets])
 
   const loadObjects = useCallback(async (bucket: string, pfx: string, off: number) => {
     setObjectsLoading(true)

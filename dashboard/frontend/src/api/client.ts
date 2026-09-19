@@ -14,6 +14,45 @@ const api = axios.create({
   timeout: 15_000,
 })
 
+// Cached DB-console auth flags. Set ONLY after a verified 200 (see
+// AuthGate); cleared here on ANY 401 so a bad/expired credential can never
+// leave a page showing a false "authenticated" state.
+const AUTH_FLAG_BY_PREFIX: Array<{ prefix: string; flag: string; service: string }> = [
+  { prefix: '/clickhouse/', flag: 'clickhouse_authenticated', service: 'clickhouse' },
+  { prefix: '/neo4j/', flag: 'neo4j_authenticated', service: 'neo4j' },
+  { prefix: '/minio/', flag: 'minio_authenticated', service: 'minio' },
+]
+
+export function clearDbAuthFlags(): void {
+  for (const { flag } of AUTH_FLAG_BY_PREFIX) sessionStorage.removeItem(flag)
+  window.dispatchEvent(new Event('omniwatch:auth-invalid'))
+}
+
+function clearDbAuthFlagForUrl(url: string | undefined): void {
+  const match = AUTH_FLAG_BY_PREFIX.find(({ prefix }) => url?.includes(prefix))
+  if (match) {
+    sessionStorage.removeItem(match.flag)
+    window.dispatchEvent(new CustomEvent('omniwatch:auth-invalid', { detail: { service: match.service } }))
+  } else {
+    clearDbAuthFlags()
+  }
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) clearDbAuthFlagForUrl(error?.config?.url)
+    return Promise.reject(error)
+  },
+)
+
+// Surface the backend's explicit error body (e.g. "ClickHouse
+// authentication failed") instead of axios's generic status text.
+export function apiError(e: unknown, fallback: string): string {
+  const err = e as { response?: { data?: { error?: string } }; message?: string }
+  return err?.response?.data?.error || err?.message || fallback
+}
+
 // ── Response types ──────────────────────────────────────────────────
 
 export interface SummaryResponse {

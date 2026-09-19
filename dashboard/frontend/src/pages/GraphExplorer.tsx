@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { neo4jQuery, neo4jSchema } from '../api/client'
+import { neo4jQuery, neo4jSchema, apiError } from '../api/client'
 import type { Neo4jQueryResult, Neo4jSchemaInfo } from '../api/client'
 import { AuthGate } from '../components/AuthGate'
 
@@ -26,7 +26,7 @@ export function GraphExplorer() {
         setError(null)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Query failed')
+      setError(apiError(e, 'Query failed'))
       setResult(null)
     } finally {
       setLoading(false)

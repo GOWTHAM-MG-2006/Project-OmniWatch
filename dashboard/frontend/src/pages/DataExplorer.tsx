@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { clickhouseQuery, clickhouseTables, clickhouseSchema } from '../api/client'
+import { clickhouseQuery, clickhouseTables, clickhouseSchema, apiError } from '../api/client'
 import type { ClickHouseQueryResult, ClickHouseTableInfo, ClickHouseSchemaColumn } from '../api/client'
 import { AuthGate } from '../components/AuthGate'
 
@@ -31,7 +31,7 @@ export function DataExplorer() {
         setError(null)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Query failed')
+      setError(apiError(e, 'Query failed'))
       setResult(null)
     } finally {
       setLoading(false)

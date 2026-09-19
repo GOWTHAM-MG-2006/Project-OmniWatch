@@ -591,8 +591,13 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-omniwatch}
       MINIO_ENDPOINT: minio:9010
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # S3 default creds MUST mirror the MinIO server root creds (server
+      # authenticates access key = root user). Wired from MINIO_ROOT_* so a
+      # credential reset on the server side flows through automatically.
+      OMNIWATCH_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      OMNIWATCH_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_SECURE: "false"
       DASHBOARD_PORT: "8011"
       OLLAMA_URL: http://ollama:11434

@@ -186,6 +186,64 @@ def _get_minio_client() -> Any:
     return _minio_client
 
 
+def _get_minio_client_for(access_key: str, secret_key: str) -> Any:
+    """Build a per-request MinIO client with user-supplied credentials.
+
+    The module singleton uses env credentials and must NOT serve the
+    user-authenticated browser consoles — every request may carry different
+    credentials that have to be verified against the server with a real
+    handshake (list_buckets/stat), never trusted on presence alone.
+    """
+    http_client = urllib3.PoolManager(
+        timeout=Timeout(connect=1.5, read=2.5),
+        maxsize=10,
+        cert_reqs="CERT_NONE" if not MINIO_SECURE else "CERT_REQUIRED",
+        retries=Retry(total=1, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504]),
+    )
+    return minio.Minio(
+        MINIO_ENDPOINT,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=MINIO_SECURE,
+        http_client=http_client,
+    )
+
+
+def _is_ch_auth_error(msg: str) -> bool:
+    """True when a ClickHouse exception message signals bad credentials.
+
+    clickhouse-connect raises at construction time (handshake) as
+    ``DatabaseError: ... code: 516 ... Authentication failed ...`` — that
+    path must map to 401, not 502.
+    """
+    m = (msg or "").lower()
+    return any(
+        s in m
+        for s in (
+            "authentication",
+            "wrong_password",
+            "unauthorized",
+            "authentication_failed",
+            "code: 516",
+        )
+    )
+
+
+def _is_minio_auth_error(msg: str) -> bool:
+    """True when a MinIO/S3 exception message signals bad credentials."""
+    m = (msg or "").lower()
+    return any(
+        s in m
+        for s in (
+            "invalidaccesskeyid",
+            "signaturedoesnotmatch",
+            "accessdenied",
+            "invalid access",
+            "forbidden",
+            "unauthorized",
+            "401",
+        )
+    )
 def _close_clients() -> None:
     global _ch_client, _neo4j_driver, _minio_client
     try:
@@ -739,7 +797,7 @@ def create_app() -> FastAPI:
         if not x_minio_access_key or not x_minio_secret_key:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             buckets = client.list_buckets()
             result: list[dict] = []
             for b in buckets:
@@ -754,6 +812,8 @@ def create_app() -> FastAPI:
             return {"buckets": result, "count": len(result), "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             _LOG.warning("MinIO list_buckets failed: %s", exc)
+            if _is_minio_auth_error(str(exc)):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             return {"buckets": [], "count": 0, "error": str(exc), "timestamp": _now_iso()}
 
     @app.post("/api/minio/buckets", response_model=None)
@@ -768,12 +828,14 @@ def create_app() -> FastAPI:
         if not name:
             return JSONResponse(status_code=422, content={"error": "name is required"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             client.make_bucket(name)
             return {"created": True, "bucket": name, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO make_bucket failed name=%s: %s", name, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "BucketAlreadyOwnedByYou" in msg or "BucketAlreadyExists" in msg:
                 return JSONResponse(status_code=409, content={"error": f"bucket already exists: {name}"})
             if "timed out" in msg.lower() or "MaxRetryError" in msg:
@@ -792,7 +854,7 @@ def create_app() -> FastAPI:
         if not x_minio_access_key or not x_minio_secret_key:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         def _sync_collect() -> tuple[list[dict], bool, int]:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             objs: list[dict] = []
             has_more = False
             idx = 0
@@ -857,6 +919,8 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO list_objects failed bucket=%s: %s", bucket, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key", "bucket": bucket, "timestamp": _now_iso()})
             if "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"bucket not found: {bucket}", "bucket": bucket, "timestamp": _now_iso()})
             if "timed out" in msg.lower() or "ReadTimeout" in msg or "MaxRetryError" in msg:
@@ -890,13 +954,15 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
             content = await file.read()
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             from io import BytesIO
             client.put_object(bucket, key, BytesIO(content), len(content), content_type=file.content_type or "application/octet-stream")
             return {"bucket": bucket, "key": key, "size": len(content), "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO upload failed bucket=%s key=%s: %s", bucket, key, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"bucket not found: {bucket}"})
             if "timed out" in msg.lower() or "MaxRetryError" in msg:
@@ -914,12 +980,14 @@ def create_app() -> FastAPI:
         if not x_minio_access_key or not x_minio_secret_key:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             stat = client.stat_object(bucket, key)
             response = client.get_object(bucket, key)
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO download failed bucket=%s key=%s: %s", bucket, key, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
             if "timed out" in msg.lower() or "MaxRetryError" in msg:
@@ -956,12 +1024,14 @@ def create_app() -> FastAPI:
         if not bucket or not key:
             return JSONResponse(status_code=422, content={"error": "bucket and key are required"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             client.remove_object(bucket, key)
             return {"deleted": True, "bucket": bucket, "key": key, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO delete failed bucket=%s key=%s: %s", bucket, key, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
             if "timed out" in msg.lower() or "MaxRetryError" in msg:
@@ -978,12 +1048,14 @@ def create_app() -> FastAPI:
         if not x_minio_access_key or not x_minio_secret_key:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             client.remove_bucket(name)
             return {"deleted": True, "bucket": name, "timestamp": _now_iso()}
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO remove_bucket failed name=%s: %s", name, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"bucket not found: {name}"})
             if "BucketNotEmpty" in msg:
@@ -1003,7 +1075,7 @@ def create_app() -> FastAPI:
         if not x_minio_access_key or not x_minio_secret_key:
             return JSONResponse(status_code=401, content={"error": "missing X-MinIO-AccessKey or X-MinIO-SecretKey header"})
         try:
-            client = _get_minio_client()
+            client = _get_minio_client_for(x_minio_access_key, x_minio_secret_key)
             stat = client.stat_object(bucket, key)
             lm = getattr(stat, "last_modified", None)
             return {
@@ -1018,6 +1090,8 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             _LOG.warning("MinIO stat_object failed bucket=%s key=%s: %s", bucket, key, msg)
+            if _is_minio_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "MinIO authentication failed: invalid access key or secret key"})
             if "NoSuchKey" in msg or "NoSuchBucket" in msg or "does not exist" in msg.lower():
                 return JSONResponse(status_code=404, content={"error": f"object not found: {bucket}/{key}"})
             if "timed out" in msg.lower() or "MaxRetryError" in msg:
@@ -2100,13 +2174,18 @@ def create_app() -> FastAPI:
                 username=x_clickhouse_user, password=x_clickhouse_password,
                 connect_timeout=5, send_receive_timeout=30,
             )
-        except Exception:
+        except Exception as exc:
+            msg = str(exc).split("\n")[0][:200]
+            if _is_ch_auth_error(msg):
+                return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
+            if "timeout" in msg.lower():
+                return JSONResponse(status_code=504, content={"error": "query timeout"})
             return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
         try:
             result = client.query(sql)
         except Exception as exc:
             msg = str(exc).split("\n")[0][:200]
-            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+            if _is_ch_auth_error(msg):
                 return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout (>30s)"})
@@ -2140,7 +2219,7 @@ def create_app() -> FastAPI:
             )
         except Exception as exc:
             msg = str(exc).split("\n")[0][:200]
-            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+            if _is_ch_auth_error(msg):
                 return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout"})
@@ -2179,7 +2258,7 @@ def create_app() -> FastAPI:
             )
         except Exception as exc:
             msg = str(exc).split("\n")[0][:200]
-            if "Authentication" in msg or "WRONG_PASSWORD" in msg or "Unauthorized" in msg:
+            if _is_ch_auth_error(msg):
                 return JSONResponse(status_code=401, content={"error": "ClickHouse authentication failed"})
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout"})
