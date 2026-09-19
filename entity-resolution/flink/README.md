@@ -2,14 +2,14 @@
 
 ## Purpose
 Cross-cloud entity resolution: normalizes raw entity identifiers from all five
-normalized telemetry topics into canonical `UnifiedEntity` records, enriches
+raw telemetry topics into canonical `UnifiedEntity` records, enriches
 them with business tags, deduplicates repeated observations, and derives
 service dependency relationships from trace spans.
 
 ## Pipeline
 
 ```
-omniwatch.{metrics,logs,traces,events,security}.normalized
+omniwatch.{metrics,logs,traces,events,security}.raw
         │  (KafkaSource, JSON → TelemetryEvent)
         ├─► ResourceIdParser ─► CloudProviderMapper ─► EntityEnricher
         │        │                  │                       │
@@ -43,9 +43,9 @@ omniwatch.{metrics,logs,traces,events,security}.normalized
 
 ## Inputs / Outputs
 
-- **Inputs (Kafka):** `omniwatch.metrics.normalized`, `omniwatch.logs.normalized`,
-  `omniwatch.traces.normalized`, `omniwatch.events.normalized`,
-  `omniwatch.security.normalized`
+- **Inputs (Kafka):** `omniwatch.metrics.raw`, `omniwatch.logs.raw`,
+  `omniwatch.traces.raw`, `omniwatch.events.raw`,
+  `omniwatch.security.raw`
 - **Outputs (Kafka):**
   - `omniwatch.entities.resolved` — `UnifiedEntity` JSON
   - `omniwatch.entities.relationships` — `EntityRelationship` JSON (CALLS)

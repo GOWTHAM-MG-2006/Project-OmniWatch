@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>On {@link #open} the sink creates the {@code feature_vectors} table if it
  * does not already exist (MergeTree, partitioned by day, 90-day TTL). Rows are
- * buffered and flushed when the buffer reaches 100 entries or 1 second has
+ * buffered and flushed when the buffer reaches 10 entries or 500 ms has
  * elapsed since the last flush. On write failure the batch is retried 3 times
  * with exponential backoff (100 ms, 500 ms, 2 s) then dropped; a static
  * {@code dropped_batches} counter tracks losses. Exceptions are never propagated

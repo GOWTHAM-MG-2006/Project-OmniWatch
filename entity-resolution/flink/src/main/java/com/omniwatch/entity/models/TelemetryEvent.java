@@ -5,7 +5,7 @@
  * Purpose: Generic view over a normalized telemetry event (metrics/logs/
  *          traces/events/security) read from Kafka as JSON. Mirrors the
  *          Phase 2 normalized models so ObjectMapper can deserialize them.
- * Inputs: Kafka topics omniwatch.{metrics,logs,traces,events,security}.normalized
+ * Inputs: Kafka topics omniwatch.{metrics,logs,traces,events,security}.raw
  * Outputs: ResourceIdParser / RelationshipBuilder
  */
 package com.omniwatch.entity.models;
