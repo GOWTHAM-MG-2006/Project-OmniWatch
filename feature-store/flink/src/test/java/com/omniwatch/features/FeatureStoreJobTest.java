@@ -27,8 +27,10 @@ class FeatureStoreJobTest {
     }
 
     @Test
-    void inputTopicIsNormalizedMetrics() {
-        assertEquals("omniwatch.metrics.normalized", FeatureStoreJob.INPUT_TOPIC);
+    void inputTopicIsRawOtlpMetrics() {
+        // Prod truth: FeatureStoreJob.java:73 — INPUT_TOPIC = "omniwatch.metrics.raw"
+        // (raw OTLP JSON from OTel Collector; parseEvent reads the resourceMetrics shape).
+        assertEquals("omniwatch.metrics.raw", FeatureStoreJob.INPUT_TOPIC);
     }
 
     @Test
@@ -101,9 +103,17 @@ class FeatureStoreJobTest {
 
     @Test
     void parseEventParsesValidJson() throws Exception {
-        String json = "{\"entity_id\":\"svc-web-1\",\"metric_name\":\"latency_ms\","
-                + "\"value\":42.5,\"timestamp\":1700000000000,"
-                + "\"is_error\":false,\"source_type\":\"performance\"}";
+        // Prod truth: FeatureStoreJob.parseEvent (FeatureStoreJob.java:251) reads raw
+        // OTLP JSON — entity id from resource.attributes service.name (:280-282),
+        // metric name/value into the attributes map from scopeMetrics dataPoints
+        // (:309-355), timestamp from timeUnixNano nanos->millis (:335-339).
+        // Scalar MetricsEvent fields (metricName/value/sourceType) are NOT populated
+        // by the OTLP path, so their defaults are asserted as-is.
+        String json = "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
+                + "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"svc-web-1\"}}]},"
+                + "\"scopeMetrics\":[{\"metrics\":[{\"name\":\"latency_ms\","
+                + "\"sum\":{\"dataPoints\":[{\"timeUnixNano\":1700000000000000000,"
+                + "\"asDouble\":42.5}]}}]}]}]}";
         Method m = FeatureStoreJob.class.getDeclaredMethod(
                 "parseEvent", ObjectMapper.class, String.class);
         m.setAccessible(true);
@@ -111,18 +121,23 @@ class FeatureStoreJobTest {
                 null, FeatureStoreJob.createMapper(), json);
         assertNotNull(evt);
         assertEquals("svc-web-1", evt.getEntityId());
-        assertEquals("latency_ms", evt.getMetricName());
-        assertEquals(42.5, evt.getValue(), 0.001);
+        assertEquals("SERVICE", evt.getEntityType());
         assertEquals(1700000000000L, evt.getTimestamp());
+        assertEquals("latency_ms", evt.getAttributes().get("metric.name"));
+        assertEquals("42.5", evt.getAttributes().get("latency_ms.value"));
+        assertNull(evt.getMetricName());
         assertFalse(evt.isError());
-        assertEquals("performance", evt.getSourceType());
+        assertNull(evt.getSourceType());
     }
 
     @Test
     void parseEventToleratesUnknownFields() throws Exception {
-        String json = "{\"entity_id\":\"x\",\"metric_name\":\"cpu\","
-                + "\"value\":1.0,\"timestamp\":100,\"is_error\":false,"
-                + "\"source_type\":\"metrics\",\"future_field\":123}";
+        // Prod truth: parseEvent only reads the resourceMetrics subtree
+        // (FeatureStoreJob.java:251-267) and createMapper disables
+        // FAIL_ON_UNKNOWN_PROPERTIES (:215-219) — unknown fields are ignored.
+        String json = "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
+                + "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"x\"}}]},"
+                + "\"scopeMetrics\":[]}],\"future_field\":123}";
         Method m = FeatureStoreJob.class.getDeclaredMethod(
                 "parseEvent", ObjectMapper.class, String.class);
         m.setAccessible(true);

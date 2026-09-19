@@ -25,12 +25,15 @@ class EntityResolutionJobTest {
     }
 
     @Test
-    void inputTopicsContainsFiveNormalizedTopics() {
+    void inputTopicsContainsFiveRawTopics() {
+        // Prod truth: EntityResolutionJob.java:64-70 — INPUT_TOPICS are *.raw OTLP
+        // (raw OTLP JSON from OTel Collector; parseEvent reads resourceMetrics/
+        // resourceLogs/resourceSpans shapes).
         assertEquals(5, EntityResolutionJob.INPUT_TOPICS.size());
         assertTrue(!EntityResolutionJob.INPUT_TOPICS.isEmpty());
         for (String t : EntityResolutionJob.INPUT_TOPICS) {
             assertTrue(t.startsWith("omniwatch."), "topic must be namespaced: " + t);
-            assertTrue(t.endsWith(".normalized"), "topic must be normalized: " + t);
+            assertTrue(t.endsWith(".raw"), "topic must be raw OTLP: " + t);
         }
     }
 
@@ -53,7 +56,8 @@ class EntityResolutionJobTest {
         EntityResolutionJob.JobConfig cfg = EntityResolutionJob.JobConfig.fromArgs(new String[]{});
         assertNotNull(cfg.kafkaBrokers);
         assertNotNull(cfg.kafkaGroupId);
-        assertEquals("flink-entity-resolution", cfg.kafkaGroupId);
+        // Prod truth: EntityResolutionJob.java:448 — default group id moved to -v2.
+        assertEquals("flink-entity-resolution-v2", cfg.kafkaGroupId);
     }
 
     @Test
@@ -65,21 +69,34 @@ class EntityResolutionJobTest {
 
     @Test
     void parseEventParsesValidJson() throws Exception {
-        String json = "{\"entity_id\":\"projects/p1/zones/us-central1-a/instances/web-1\","
-                + "\"entity_type\":\"API_NODE\",\"timestamp\":1700000000000,"
-                + "\"source_type\":\"metrics\",\"source_topic\":\"omniwatch.metrics.normalized\"}";
+        // Prod truth: EntityResolutionJob.parseEvent (EntityResolutionJob.java:165)
+        // reads raw OTLP JSON — signal type inferred from the resource* key
+        // (:203-208), entity id from resource.attributes service.name (:236-238),
+        // timestamp from dataPoints timeUnixNano nanos->millis (:292-296).
+        String json = "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
+                + "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"svc-web-1\"}}]},"
+                + "\"scopeMetrics\":[{\"metrics\":[{\"name\":\"latency_ms\","
+                + "\"sum\":{\"dataPoints\":[{\"timeUnixNano\":1700000000000000000,"
+                + "\"asDouble\":42.5}]}}]}]}]}";
         Method m = EntityResolutionJob.class.getDeclaredMethod("parseEvent", ObjectMapper.class, String.class);
         m.setAccessible(true);
         TelemetryEvent evt = (TelemetryEvent) m.invoke(null, EntityResolutionJob.createMapper(), json);
         assertNotNull(evt);
-        assertEquals("projects/p1/zones/us-central1-a/instances/web-1", evt.getEntityId());
-        assertEquals("API_NODE", evt.getEntityType());
+        assertEquals("svc-web-1", evt.getEntityId());
+        assertEquals("SERVICE", evt.getEntityType());
+        assertEquals("metrics", evt.getSourceType());
         assertEquals(1700000000000L, evt.getTimestamp());
+        assertEquals("latency_ms", evt.getAttributes().get("metric.name"));
     }
 
     @Test
     void parseEventToleratesUnknownFields() throws Exception {
-        String json = "{\"entity_id\":\"x\",\"entity_type\":\"API_NODE\",\"future_field\":123}";
+        // Prod truth: parseEvent only reads the resource* subtrees
+        // (EntityResolutionJob.java:165-201) and createMapper disables
+        // FAIL_ON_UNKNOWN_PROPERTIES (:154-158) — unknown fields are ignored.
+        String json = "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
+                + "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"x\"}}]}}],"
+                + "\"future_field\":123}";
         Method m = EntityResolutionJob.class.getDeclaredMethod("parseEvent", ObjectMapper.class, String.class);
         m.setAccessible(true);
         TelemetryEvent evt = (TelemetryEvent) m.invoke(null, EntityResolutionJob.createMapper(), json);

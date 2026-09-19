@@ -216,11 +216,12 @@ class FeatureStoreWriterTest {
     }
 
     // ================================================================
-    // Test 6: Flush triggers at 100 rows (size-based)
+    // Test 6: Flush triggers at 10 rows (size-based)
+    // Prod truth: FeatureStoreWriter.java:53 — BATCH_SIZE = 10.
     // ================================================================
 
     @Test
-    void flushTriggersAt100Rows() throws Exception {
+    void flushTriggersAt10Rows() throws Exception {
         FeatureStoreWriter writer = new FeatureStoreWriter("localhost", 8123, "omniwatch");
 
         // Initialize transient fields via reflection
@@ -235,19 +236,20 @@ class FeatureStoreWriterTest {
 
         // connection is null — flush() will clear buffer, executeBatchInsert returns early
 
-        // Add 99 items — should NOT flush
-        for (int i = 0; i < 99; i++) {
+        // Add 9 items — should NOT flush
+        for (int i = 0; i < 9; i++) {
             writer.invoke(sampleVector(), null);
         }
-        assertEquals(99, buffer.size(), "buffer should hold 99 rows before threshold");
+        assertEquals(9, buffer.size(), "buffer should hold 9 rows before threshold");
 
-        // Add 100th item — size >= BATCH_SIZE triggers flush → buffer cleared
+        // Add 10th item — size >= BATCH_SIZE triggers flush → buffer cleared
         writer.invoke(sampleVector(), null);
-        assertEquals(0, buffer.size(), "buffer should be empty after flush at 100 rows");
+        assertEquals(0, buffer.size(), "buffer should be empty after flush at 10 rows");
     }
 
     // ================================================================
-    // Test 7: Flush triggers after 1-second interval (time-based)
+    // Test 7: Flush triggers after 500ms interval (time-based)
+    // Prod truth: FeatureStoreWriter.java:56 — FLUSH_INTERVAL_MS = 500.
     // ================================================================
 
     @Test
@@ -264,7 +266,7 @@ class FeatureStoreWriterTest {
         // Set lastFlushMs to 2 seconds ago so the time check triggers
         lastFlushField.set(writer, System.currentTimeMillis() - 2000L);
 
-        // Add 1 item — time-based flush should trigger (even though < 100 rows)
+        // Add 1 item — time-based flush should trigger (even though < 10 rows)
         writer.invoke(sampleVector(), null);
         assertEquals(0, buffer.size(),
                 "buffer should be empty after time-interval flush with 1 row");
@@ -304,8 +306,10 @@ class FeatureStoreWriterTest {
 
     @Test
     void batchConstantsAreCorrect() {
-        assertEquals(100, FeatureStoreWriter.BATCH_SIZE);
-        assertEquals(1000L, FeatureStoreWriter.FLUSH_INTERVAL_MS);
+        // Prod truth: FeatureStoreWriter.java:53 BATCH_SIZE=10, :56 FLUSH_INTERVAL_MS=500,
+        // :59 MAX_RETRIES=3, :62 RETRY_DELAYS_MS={100,500,2000}.
+        assertEquals(10, FeatureStoreWriter.BATCH_SIZE);
+        assertEquals(500L, FeatureStoreWriter.FLUSH_INTERVAL_MS);
         assertEquals(3, FeatureStoreWriter.MAX_RETRIES);
         assertArrayEquals(new long[]{100L, 500L, 2000L}, FeatureStoreWriter.RETRY_DELAYS_MS);
     }
