@@ -8,10 +8,62 @@
  */
 
 import axios from 'axios'
+import {
+  clearSession,
+  getSession,
+  notifySessionInvalid,
+  SESSION_INVALID_EVENT,
+} from '../auth/session'
+
+export { SESSION_INVALID_EVENT }
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 15_000,
+})
+
+// Identity service (identity/main.py, port 8012). In dev, vite proxies
+// '/identity' -> http://localhost:8012 (see vite.config.ts); in compose the
+// same relative prefix is served by the front proxy. Never hardcode a host.
+const identityApi = axios.create({
+  baseURL: '/identity',
+  timeout: 15_000,
+})
+
+// Attach `Authorization: Bearer` (session memory) + the active-workspace
+// header on every dashboard call. The backend (todo 5) enforces the `ws`
+// claim; the header is the routing hint so scoped queries resolve without
+// re-decoding the token per call. Missing session -> no headers (the page
+// guards redirect to /login before any call happens).
+api.interceptors.request.use((config) => {
+  const session = getSession()
+  if (session) {
+    config.headers = config.headers ?? {}
+    config.headers['Authorization'] = `Bearer ${session.accessToken}`
+    if (session.workspaceId) {
+      config.headers['X-Workspace-Id'] = session.workspaceId
+    }
+  }
+  return config
+})
+
+// Attach Bearer on identity calls that need it (/auth/me, /workspaces*).
+// Login/register/refresh carry their own bodies and must NOT send a stale
+// token — the guards call them only when logged out or rotating.
+identityApi.interceptors.request.use((config) => {
+  const url = config.url ?? ''
+  const needsAuth =
+    url.startsWith('/auth/me') ||
+    url.startsWith('/workspaces') ||
+    url.startsWith('/auth/logout')
+  if (needsAuth) {
+    const session = getSession()
+    if (session) {
+      config.headers = config.headers ?? {}
+      config.headers['Authorization'] = `Bearer ${session.accessToken}`
+    }
+  }
+  return config
 })
 
 // Cached DB-console auth flags. Set ONLY after a verified 200 (see
@@ -41,7 +93,36 @@ function clearDbAuthFlagForUrl(url: string | undefined): void {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error?.response?.status === 401) clearDbAuthFlagForUrl(error?.config?.url)
+    if (error?.response?.status === 401) {
+      clearDbAuthFlagForUrl(error?.config?.url)
+      // A 401 on a Bearer-authenticated dashboard call means the JWT is
+      // expired/tampered/mismatched: drop the session and re-lock every
+      // session-gated page (same discipline as the DB AuthGates — a stale
+      // `ws` claim must never leave data visible).
+      const sentAuth = (error?.config?.headers as Record<string, unknown> | undefined)?.['Authorization']
+      if (sentAuth) {
+        clearSession()
+        notifySessionInvalid()
+      }
+    }
+    return Promise.reject(error)
+  },
+)
+
+identityApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      const url = (error?.config?.url ?? '') as string
+      // Login itself 401s on wrong creds — that is a form error, not a
+      // session invalidation (there is no session yet). Every other 401
+      // drops the session and re-locks.
+      const isLoginAttempt = url.startsWith('/auth/login')
+      if (!isLoginAttempt) {
+        clearSession()
+        notifySessionInvalid()
+      }
+    }
     return Promise.reject(error)
   },
 )
@@ -518,3 +599,174 @@ export async function minioMetadata(bucket: string, key: string): Promise<{
 }
 
 export default api
+
+// ── Identity + workspaces + onboarding (ENTRY-4) ─────────────────────
+// Contracts: identity/auth.py (JWT Bearer), identity/workspaces.py (CRUD +
+// switch re-issuing `ws`), identity/onboarding.py (enums + suggested_config).
+
+export interface TokenPair {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+}
+
+export interface RegisterResult {
+  user_id: string
+  email: string
+  created_at: string
+}
+
+export interface MeResult {
+  user_id: string
+  email: string
+  created_at: string
+}
+
+export async function identityRegister(email: string, password: string): Promise<RegisterResult> {
+  const { data } = await identityApi.post<RegisterResult>('/auth/register', { email, password })
+  return data
+}
+
+export async function identityLogin(email: string, password: string): Promise<TokenPair> {
+  const { data } = await identityApi.post<TokenPair>('/auth/login', { email, password })
+  return data
+}
+
+export async function identityRefresh(refreshToken: string): Promise<TokenPair> {
+  const { data } = await identityApi.post<TokenPair>('/auth/refresh', { refresh_token: refreshToken })
+  return data
+}
+
+export async function identityLogout(refreshToken: string): Promise<void> {
+  await identityApi.post('/auth/logout', { refresh_token: refreshToken })
+}
+
+export async function identityMe(): Promise<MeResult> {
+  const { data } = await identityApi.get<MeResult>('/auth/me')
+  return data
+}
+
+export interface Workspace {
+  workspace_id: string
+  name: string
+  slug: string
+  app_type: string
+  cloud_provider: string
+  endpoints: string[]
+  expected_volume: string
+  retention_days: number
+  created_at: string
+  kafka_topic_prefix: string
+  clickhouse_database: string
+  minio_prefix: string
+  neo4j_workspace: string
+  k8s_namespace: string
+}
+
+export interface WorkspaceCreateResult {
+  workspace: Workspace
+  provisioning: Record<string, string>
+  connection_bundle: {
+    kafka_topic_prefix: string
+    clickhouse_database: string
+    minio_prefix: string
+    neo4j_workspace: string
+    k8s_namespace: string
+    otlp_note: string
+    agent_config: Record<string, string>
+  }
+}
+
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const { data } = await identityApi.get<Workspace[]>('/workspaces')
+  return data
+}
+
+export async function getWorkspace(id: string): Promise<Workspace> {
+  const { data } = await identityApi.get<Workspace>(`/workspaces/${encodeURIComponent(id)}`)
+  return data
+}
+
+export async function createWorkspace(input: {
+  name: string
+  slug?: string
+  app_type?: string
+  cloud_provider?: string
+  endpoints?: string[]
+  expected_volume?: string
+  retention_days?: number
+}): Promise<WorkspaceCreateResult> {
+  const { data } = await identityApi.post<WorkspaceCreateResult>('/workspaces', input)
+  return data
+}
+
+export async function renameWorkspace(id: string, name: string): Promise<Workspace> {
+  const { data } = await identityApi.patch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, { name })
+  return data
+}
+
+export async function deleteWorkspace(id: string): Promise<{ workspace_id: string; deleted: boolean }> {
+  const { data } = await identityApi.delete(`/workspaces/${encodeURIComponent(id)}`)
+  return data
+}
+
+export async function switchWorkspace(id: string): Promise<{
+  access_token: string
+  token_type: string
+  expires_in: number
+  workspace_id: string
+}> {
+  const { data } = await identityApi.post(`/workspaces/${encodeURIComponent(id)}/switch`)
+  return data
+}
+
+// Wizard enums mirror identity/models.py exactly (closed vocabularies;
+// anything outside these is a 422 server-side).
+export const APP_TYPES = ['api', 'worker', 'ml', 'iot', 'custom'] as const
+export const CLOUD_PROVIDERS = ['aws', 'azure', 'gcp', 'onprem', 'other'] as const
+export const VOLUME_BANDS = ['<100', '100-1k', '1k-10k', '>10k'] as const
+
+export type AppType = (typeof APP_TYPES)[number]
+export type CloudProvider = (typeof CLOUD_PROVIDERS)[number]
+export type VolumeBand = (typeof VOLUME_BANDS)[number]
+
+export interface OnboardingAnswers {
+  app_name: string
+  app_type: AppType
+  cloud_provider: CloudProvider
+  service_endpoints: string[]
+  expected_eps: VolumeBand
+  log_volume: VolumeBand
+  retention_days: number
+  alert_contact: string
+}
+
+export interface SuggestedConfig {
+  queue_depth: number
+  batch_size: number
+  poll_interval_s: number
+  scrape_interval_s: number
+}
+
+export interface OnboardingResult {
+  workspace_id: string
+  slug: string
+  answers: OnboardingAnswers
+  suggested_config: SuggestedConfig
+  config_path: string
+  updated_at: string
+}
+
+export async function getOnboarding(id: string): Promise<OnboardingResult> {
+  const { data } = await identityApi.get<OnboardingResult>(`/workspaces/${encodeURIComponent(id)}/onboarding`)
+  return data
+}
+
+export async function submitOnboarding(id: string, answers: OnboardingAnswers): Promise<OnboardingResult> {
+  const { data } = await identityApi.post<OnboardingResult>(
+    `/workspaces/${encodeURIComponent(id)}/onboarding`,
+    answers,
+  )
+  return data
+}

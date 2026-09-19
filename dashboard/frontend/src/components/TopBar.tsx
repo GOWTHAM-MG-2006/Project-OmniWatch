@@ -1,10 +1,42 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTimeRange, TIMEFRAMES, type Timeframe } from '../hooks/useTimeRange'
 import { CopilotDrawer } from './CopilotDrawer'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
+import { clearSession, getSession, SESSION_INVALID_EVENT } from '../auth/session'
+import { identityLogout } from '../api/client'
+import { useEffect } from 'react'
 
 export function TopBar() {
   const { timeRange, setTimeRange } = useTimeRange()
   const [copilotOpen, setCopilotOpen] = useState(false)
+  const [email, setEmail] = useState<string | null>(() => getSession()?.email ?? null)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const sync = () => setEmail(getSession()?.email ?? null)
+    sync()
+    window.addEventListener(SESSION_INVALID_EVENT, sync)
+    return () => window.removeEventListener(SESSION_INVALID_EVENT, sync)
+  }, [])
+
+  const handleLogout = async () => {
+    const refreshToken = getSession()?.refreshToken
+    clearSession()
+    window.dispatchEvent(new Event(SESSION_INVALID_EVENT))
+    navigate('/login', { replace: true })
+    // Best-effort server revocation (fire-and-forget after local clear so
+    // a failed call can never leave the UI logged in).
+    if (refreshToken) {
+      try {
+        await identityLogout(refreshToken)
+      } catch {
+        // already logged out locally — nothing to show
+      }
+    }
+  }
+
+  const authed = email !== null || getSession() !== null
 
   return (
     <>
@@ -34,6 +66,22 @@ export function TopBar() {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Workspace switcher (ENTRY-4) */}
+        {authed && <WorkspaceSwitcher />}
+
+        {/* Session identity + logout */}
+        {authed && (
+          <div className="flex items-center gap-2">
+            {email && <span className="text-[11px] font-mono text-text-muted truncate max-w-[180px]">{email}</span>}
+            <button
+              onClick={() => void handleLogout()}
+              className="px-2 py-1.5 text-xs font-mono text-red-400 hover:text-red-300"
+            >
+              Logout
+            </button>
+          </div>
+        )}
 
         {/* Copilot Button */}
         <button
