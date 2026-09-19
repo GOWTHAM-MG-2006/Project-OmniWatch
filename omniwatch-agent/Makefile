@@ -8,7 +8,7 @@ SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 .PHONY: build-reproducible sbom sign verify verify-reproducible
 
 build-reproducible:
-	docker buildx build --progress=plain \
+	docker buildx build --load --progress=plain \
 		--build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
 		-t $(IMAGE) -f Dockerfile .
 
