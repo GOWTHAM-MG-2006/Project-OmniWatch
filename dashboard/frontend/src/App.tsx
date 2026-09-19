@@ -57,7 +57,7 @@ function DashboardShell() {
 function EntryShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
-      <TopBar />
+      <TopBar showWorkspaceControls={false} />
       <main className="flex-1 overflow-y-auto">
         {children}
       </main>
