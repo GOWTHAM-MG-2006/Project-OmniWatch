@@ -59,7 +59,7 @@ jobs:
         run: cosign sign --yes "${{ env.IMAGE }}"
 
       - name: Verify signature (keyless)
-        run: cosign verify "${{ env.IMAGE }}"
+        run: cosign verify --certificate-identity-regexp 'https://github.com/GOWTHAM-MG-2006/.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
 
       - name: Attach SBOM to release
         uses: softprops/action-gh-release@v2
