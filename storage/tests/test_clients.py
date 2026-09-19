@@ -11,6 +11,7 @@ Outputs: pytest pass/fail for all storage client unit tests
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,19 +25,26 @@ from storage.config import StorageConfig
 # ---------------------------------------------------------------------------
 
 def _cfg() -> StorageConfig:
-    """Return a minimal StorageConfig without reading env vars."""
+    """Return a minimal StorageConfig for mocked tests.
+
+    ClickHouse user/password resolve from the environment with the legacy
+    passwordless defaults preserved, so this suite passes both against an
+    open server (no env vars set) and against a password-enforced server
+    (CLICKHOUSE_USER/CLICKHOUSE_PASSWORD exported). Values are never
+    asserted — all drivers are mocked — so env-awareness is zero-risk.
+    """
     return StorageConfig(
         clickhouse_host="test-ch",
         clickhouse_port=8123,
         clickhouse_db="test_db",
-        clickhouse_user="default",
-        clickhouse_password="",
+        clickhouse_user=os.environ.get("CLICKHOUSE_USER", "default"),
+        clickhouse_password=os.environ.get("CLICKHOUSE_PASSWORD", ""),
         neo4j_uri="bolt://test-neo4j:7687",
-        neo4j_user="neo4j",
-        neo4j_password="test",
+        neo4j_user=os.environ.get("NEO4J_USER", "neo4j"),
+        neo4j_password=os.environ.get("NEO4J_PASSWORD", "test"),
         minio_endpoint="test-minio:9010",
-        minio_access_key="key",
-        minio_secret_key="secret",
+        minio_access_key=os.environ.get("MINIO_ACCESS_KEY", "key"),
+        minio_secret_key=os.environ.get("MINIO_SECRET_KEY", "secret"),
         minio_secure=False,
     )
 
