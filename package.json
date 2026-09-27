@@ -1,0 +1,25 @@
+{
+  "name": "project-omniwatch",
+  "version": "1.0.0",
+  "description": "Proactive anomaly detection, causal root cause analysis, automated remediation, and self-healing for cloud-native environments.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GOWTHAM-MG-2006/Project-OmniWatch.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/GOWTHAM-MG-2006/Project-OmniWatch/issues"
+  },
+  "homepage": "https://github.com/GOWTHAM-MG-2006/Project-OmniWatch#readme"
+}
