@@ -140,6 +140,64 @@ func TestLoadFromYAML(t *testing.T) {
 	}
 }
 
+func TestLoadImporterFromBundleYAML(t *testing.T) {
+	clearEnv(t)
+	// Shape mirrors identity/exporters.py _bundle_zip: every key here must
+	// bind, or iron deployments silently run with empty credentials.
+	const bundleYAML = `
+exporter:
+  otlp:
+    endpoint: otel-collector:4317
+    insecure: true
+importer:
+  endpoint: "http://100.107.175.64:4320/ingest"
+  api_token: "bundle-token-abc"
+  exporter_number: 2
+  exporter_name: "web-01"
+  entity_id: "exporter-2-test"
+`
+	path := writeTempYAML(t, bundleYAML)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Importer.Endpoint != "http://100.107.175.64:4320/ingest" {
+		t.Errorf("importer endpoint = %q, want bundle value", cfg.Importer.Endpoint)
+	}
+	if cfg.Importer.APIToken != "bundle-token-abc" {
+		t.Errorf("importer api_token = %q, want bundle value", cfg.Importer.APIToken)
+	}
+	if cfg.Importer.ExporterNumber != 2 {
+		t.Errorf("exporter number = %d, want 2", cfg.Importer.ExporterNumber)
+	}
+	if cfg.Importer.ExporterName != "web-01" {
+		t.Errorf("exporter name = %q, want web-01", cfg.Importer.ExporterName)
+	}
+	if cfg.Importer.EntityID != "exporter-2-test" {
+		t.Errorf("entity id = %q, want exporter-2-test", cfg.Importer.EntityID)
+	}
+}
+
+func TestImporterTokenEnvOverridesYAML(t *testing.T) {
+	clearEnv(t)
+	const bundleYAML = `
+importer:
+  endpoint: "http://100.107.175.64:4320/ingest"
+  api_token: "bundle-token-abc"
+`
+	path := writeTempYAML(t, bundleYAML)
+	t.Setenv("OMNIWATCH_IMPORTER_API_TOKEN", "env-token-xyz")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Importer.APIToken != "env-token-xyz" {
+		t.Errorf("importer api_token = %q, want env override", cfg.Importer.APIToken)
+	}
+}
+
 func TestEnvOverridesYAML(t *testing.T) {
 	clearEnv(t)
 	path := writeTempYAML(t, testYAML)

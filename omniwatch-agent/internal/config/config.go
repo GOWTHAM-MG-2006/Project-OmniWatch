@@ -83,6 +83,10 @@ type Config struct {
 			MetricExportInterval time.Duration `yaml:"metric_export_interval"`
 		} `yaml:"otlp"`
 	} `yaml:"exporter"`
+	// Importer selects direct-to-workspace HTTP export (exporter-importer
+	// split). Empty Endpoint keeps the legacy OTLP gRPC path. The API token
+	// is populated from the environment only, never from YAML.
+	Importer ImporterConfig `yaml:"importer"`
 	TLS struct {
 		CertRotationInterval time.Duration `yaml:"cert_rotation_interval"`
 		SpiffeSocketPath     string        `yaml:"spiffe_socket_path"`
@@ -99,6 +103,31 @@ type Config struct {
 	Resilience ResilienceConfig `yaml:"resilience"`
 	Alerting  AlertingConfig  `yaml:"alerting"`
 	Beyla     BeylaConfig     `yaml:"beyla"`
+}
+
+// ImporterConfig tunes direct-to-importer HTTP export. Endpoint is the full
+// /ingest URL (e.g. http://100.107.175.64:4320/ingest). APIToken reads from
+// YAML like every other knob; OMNIWATCH_IMPORTER_API_TOKEN overrides it when
+// set (env wins, so secret managers keep working).
+type ImporterConfig struct {
+	Endpoint       string `yaml:"endpoint"`
+	APIToken       string `yaml:"api_token"`
+	ExporterNumber int    `yaml:"exporter_number"`
+	ExporterName   string `yaml:"exporter_name"`
+	EntityID       string `yaml:"entity_id"`
+	// Docker enables real application telemetry from the local Engine:
+	// container log tailing + stats polling for the allowlisted names.
+	// Absent/empty Containers keeps heartbeat-only mode (backward compatible).
+	Docker DockerSource `yaml:"docker"`
+}
+
+// DockerSource tunes container telemetry. SocketPath defaults to the standard
+// Engine socket; Containers is an allowlist of container names (empty =
+// disabled); LogTail caps first-run backfill lines per container.
+type DockerSource struct {
+	SocketPath string   `yaml:"socket_path"`
+	Containers []string `yaml:"containers"`
+	LogTail    int      `yaml:"log_tail"`
 }
 
 // AlertingConfig tunes rule-file loading and SLO targets. Rule semantics
@@ -226,7 +255,7 @@ func Default() *Config {
 	c.Agent.HealthReadTimeout = 5 * time.Second
 	c.Agent.HealthWriteTimeout = 5 * time.Second
 	c.Agent.ExportInitTimeout = 10 * time.Second
-	c.Agent.HeartbeatEmitTimeout = 10 * time.Second
+	c.Agent.HeartbeatEmitTimeout = 30 * time.Second
 	c.Receiver.Hostmetrics.CollectionInterval = 60 * time.Second
 	c.Receiver.Filelog.Include = []string{"/var/log/pods/*/*/*.log", "/var/log/containers/*/*.log", "/var/log/kubernetes/audit/*.log"}
 	c.Receiver.Filelog.Exclude = []string{"/var/log/pods/*/*/**.gz"}
@@ -253,6 +282,13 @@ func Default() *Config {
 	c.Exporter.OTLP.Endpoint = "otel-collector:4317"
 	c.Exporter.OTLP.Insecure = true
 	c.Exporter.OTLP.MetricExportInterval = 10 * time.Second
+	c.Importer.Endpoint = ""
+	c.Importer.APIToken = ""
+	c.Importer.ExporterNumber = 1
+	c.Importer.ExporterName = ""
+	c.Importer.EntityID = ""
+	c.Importer.Docker.SocketPath = "/var/run/docker.sock"
+	c.Importer.Docker.LogTail = 100
 	c.TLS.CertRotationInterval = 24 * time.Hour
 	c.TLS.SpiffeSocketPath = "unix:///tmp/spire-agent/public/api.sock"
 	c.TLS.TrustDomain = "example.org"
@@ -406,6 +442,34 @@ func applyEnvOverrides(c *Config) {
 	if v, ok := lookupEnv("OMNIWATCH_METRIC_EXPORT_INTERVAL_S"); ok {
 		if d, err := parseSeconds(v); err == nil && d > 0 {
 			c.Exporter.OTLP.MetricExportInterval = d
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_ENDPOINT"); ok {
+		c.Importer.Endpoint = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_API_TOKEN"); ok {
+		c.Importer.APIToken = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_EXPORTER_NUMBER"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			c.Importer.ExporterNumber = n
+		}
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_EXPORTER_NAME"); ok {
+		c.Importer.ExporterName = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_ENTITY_ID"); ok {
+		c.Importer.EntityID = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_DOCKER_SOCKET"); ok {
+		c.Importer.Docker.SocketPath = v
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_DOCKER_CONTAINERS"); ok {
+		c.Importer.Docker.Containers = splitList(v)
+	}
+	if v, ok := lookupEnv("OMNIWATCH_IMPORTER_DOCKER_LOG_TAIL"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			c.Importer.Docker.LogTail = n
 		}
 	}
 	if v, ok := lookupEnv("OMNIWATCH_BEYLA_OTLP_ENDPOINT"); ok {
