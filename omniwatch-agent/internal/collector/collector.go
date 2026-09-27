@@ -10,7 +10,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -28,6 +30,8 @@ import (
 	_ "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sobjectsreceiver"
 
 	"github.com/omniwatch/omniwatch-agent/internal/config"
+	"github.com/omniwatch/omniwatch-agent/internal/direct"
+	"github.com/omniwatch/omniwatch-agent/internal/docker"
 	"github.com/omniwatch/omniwatch-agent/internal/exporter"
 	"github.com/omniwatch/omniwatch-agent/internal/resilience"
 )
@@ -53,6 +57,17 @@ type Collector struct {
 	build    component.BuildInfo
 	pipeline Pipeline
 
+	// direct ships heartbeats straight to a workspace importer over HTTP.
+	// Nil unless cfg.Importer.Endpoint is set; when present it replaces the
+	// OTLP path for heartbeats (receivers still describe the pipeline).
+	direct *direct.Client
+
+	// apptailer/appoller ship real container telemetry (logs + stats) for
+	// the configured allowlist. Nil unless docker containers are configured;
+	// nil means heartbeat-only mode.
+	apptailer *docker.Tailer
+	appoller  *docker.Poller
+
 	tracer     trace.Tracer
 	counter    metric.Int64Counter
 	otelLogger log.Logger
@@ -62,6 +77,8 @@ type Collector struct {
 	// omniwatch.agent.queue_dropped; notifyCh wakes the drain worker.
 	queue    *resilience.BoundedQueue[struct{}]
 	notifyCh chan struct{}
+
+	emitted atomic.Uint64
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -129,6 +146,37 @@ func New(cfg *config.Config, exp *exporter.Exporter, logger *slog.Logger) *Colle
 	}
 	exp.ConfigureResilience(breaker, &retry)
 
+	if cfg.Importer.Endpoint != "" {
+		dcfg := direct.Config{
+			Endpoint:       cfg.Importer.Endpoint,
+			APIToken:       cfg.Importer.APIToken,
+			ExporterNumber: cfg.Importer.ExporterNumber,
+			ExporterName:   cfg.Importer.ExporterName,
+			EntityID:       cfg.Importer.EntityID,
+			Timeout:        15 * time.Second,
+		}
+		if dcfg.ExporterNumber <= 0 {
+			dcfg.ExporterNumber = 1
+		}
+		if dcfg.EntityID == "" {
+			if host, err := os.Hostname(); err == nil && host != "" {
+				dcfg.EntityID = fmt.Sprintf("exporter-%d-%s", dcfg.ExporterNumber, host)
+			} else {
+				dcfg.EntityID = fmt.Sprintf("exporter-%d", dcfg.ExporterNumber)
+			}
+		}
+		c.direct = direct.New(dcfg, logger)
+		c.direct.ConfigureResilience(breaker, &retry)
+		c.pipeline.Exporters = []string{"importer-direct"}
+		logger.Info("direct importer export enabled", "endpoint", dcfg.Endpoint)
+		if len(cfg.Importer.Docker.Containers) > 0 {
+			dcli := docker.New(cfg.Importer.Docker.SocketPath)
+			c.apptailer = docker.NewTailer(dcli, dcfg.EntityID, cfg.Importer.Docker.Containers, cfg.Importer.Docker.LogTail, logger)
+			c.appoller = docker.NewPoller(dcli, dcfg.EntityID, cfg.Importer.Docker.Containers, logger)
+			logger.Info("docker app telemetry enabled", "containers", cfg.Importer.Docker.Containers, "socket", dcli.SocketPath())
+		}
+	}
+
 	dropCounter, err := exp.Meter(instrumentationScope).Int64Counter(
 		resilience.QueueDroppedMetric,
 		metric.WithDescription("Heartbeat emissions dropped from a full bounded queue."),
@@ -169,17 +217,53 @@ func (c *Collector) drain() {
 		if _, ok := c.queue.Dequeue(); !ok {
 			return
 		}
+		// Batch assembly (host stats, docker tail/stats, security tail) runs
+		// outside the emit timeout: on small boxes the docker API calls
+		// alone can exceed it, which previously expired the context before
+		// the breaker ever executed. The timeout below bounds the network
+		// export only.
+		if c.direct != nil {
+			batches := c.direct.BuildHeartbeat()
+			batches = append(batches, c.direct.TailSecurity()...)
+			// Real app telemetry rides the same emission (one extra batch
+			// per source, still one POST per batch). Nil-safe: unconfigured
+			// tailer/poller return nil and the heartbeat path is untouched.
+			if c.apptailer != nil {
+				batches = append(batches, c.apptailer.Collect()...)
+			}
+			if c.appoller != nil {
+				batches = append(batches, c.appoller.Collect()...)
+			}
+			emitTimeout := c.cfg.Agent.HeartbeatEmitTimeout
+			if emitTimeout <= 0 {
+				emitTimeout = 30 * time.Second
+			}
+			emitCtx, cancel := context.WithTimeout(context.Background(), emitTimeout)
+			if err := c.direct.ExportWithResilience(emitCtx, batches); err != nil {
+				c.logger.Warn("direct heartbeat export failed (guarded)", "error", err)
+			} else {
+				n := c.emitted.Add(1)
+				c.logger.Info("direct heartbeat export succeeded", "emitted", n, "endpoint", c.direct.Endpoint())
+			}
+			cancel()
+			continue
+		}
 		emitTimeout := c.cfg.Agent.HeartbeatEmitTimeout
 		if emitTimeout <= 0 {
-			emitTimeout = 10 * time.Second
+			emitTimeout = 30 * time.Second
 		}
 		emitCtx, cancel := context.WithTimeout(context.Background(), emitTimeout)
 		if err := c.exp.ExportWithResilience(emitCtx, c.emitHeartbeat); err != nil {
 			c.logger.Warn("heartbeat export failed (guarded)", "error", err)
+		} else {
+			n := c.emitted.Add(1)
+			c.logger.Info("heartbeat export succeeded", "emitted", n, "endpoint", c.exp.Endpoint())
 		}
 		cancel()
 	}
 }
+
+func (c *Collector) Emitted() uint64 { return c.emitted.Load() }
 
 // Pipeline returns the configured receivers → processors → exporters wiring.
 func (c *Collector) Pipeline() Pipeline { return c.pipeline }
