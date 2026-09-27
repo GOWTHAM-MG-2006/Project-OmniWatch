@@ -103,6 +103,12 @@ class WorkspaceRegistry:
             self._by_id.clear()
             self._slugs.clear()
 
+    def restore(self, record: WorkspaceRecord) -> None:
+        """Load one deduplicated row (boot reload from ClickHouse mirror)."""
+        with self._lock:
+            self._by_id[record.workspace_id] = record
+            self._slugs.add(record.slug)
+
     def _unique_slug(self, desired: str) -> str:
         slug, counter = desired, 2
         while slug in self._slugs:
@@ -267,6 +273,8 @@ class WorkspaceCreateResponse(BaseModel):
     workspace: WorkspaceResponse
     provisioning: dict[str, str]
     connection_bundle: ConnectionBundle
+    importer_endpoint: str | None = None
+    importer_token: str | None = None
 
 
 class SwitchResponse(BaseModel):
@@ -400,10 +408,26 @@ def create_workspace(body: WorkspaceCreate, ctx: Any = Depends(resolve_caller)) 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result = provision_module.provision_workspace(record)
     logger.info("workspace created slug=%s user_id=%s", record.slug, ctx.user_id)
+    importer_endpoint: str | None = None
+    importer_token: str | None = None
+    try:
+        from identity import importers as importers_module
+
+        importer_record, raw_token = (
+            importers_module.get_importer_registry().ensure_for_workspace(
+                ctx.user_id, record.workspace_id, record.slug
+            )
+        )
+        importer_endpoint = importer_record.endpoint_url
+        importer_token = raw_token
+    except Exception:  # noqa: BLE001 - importer creds must never fail creation
+        logger.warning("importer issuance degraded slug=%s", record.slug, exc_info=True)
     return WorkspaceCreateResponse(
         workspace=to_response(record),
         provisioning=result.statuses,
         connection_bundle=result.bundle,
+        importer_endpoint=importer_endpoint,
+        importer_token=importer_token,
     )
 
 
@@ -436,6 +460,12 @@ def rename_workspace(
         ) from exc
     if record is None:
         raise _forbidden()
+    try:
+        from identity import persistence as persistence_module
+
+        persistence_module.mirror_workspace(record)
+    except Exception:  # noqa: BLE001 - mirror must never fail rename
+        logger.warning("workspace mirror degraded", exc_info=True)
     return to_response(record)
 
 
@@ -446,6 +476,12 @@ def delete_workspace(workspace_id: str, ctx: Any = Depends(resolve_caller)) -> d
     if record is None:
         raise _forbidden()
     logger.info("workspace tombstoned slug=%s user_id=%s", record.slug, ctx.user_id)
+    try:
+        from identity import persistence as persistence_module
+
+        persistence_module.mirror_workspace(record)
+    except Exception:  # noqa: BLE001 - mirror must never fail delete
+        logger.warning("workspace mirror degraded", exc_info=True)
     return {"workspace_id": workspace_id, "deleted": True}
 
 

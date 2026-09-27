@@ -20,10 +20,16 @@ import sys
 
 from fastapi import FastAPI
 
+from identity.agents import reset_agent_registry
+from identity.agents import router as agents_router
 from identity.auth import configure, router as auth_router
+from identity.exporters import reset_exporter_registry
+from identity.exporters import router as exporters_router
+from identity.importers import reset_importer_registry
+from identity.importers import router as importers_router
 from identity.onboarding import reset_onboarding_store, router as onboarding_router
 from identity.settings import IdentitySettings
-from identity.store import ClickHouseStore, MemoryStore, build_store
+from identity.store import ClickHouseStore, DuplicateEmailError, MemoryStore, build_store
 from identity.workspaces import reset_registry, router as workspaces_router
 
 logger = logging.getLogger("omniwatch.identity.service")
@@ -54,6 +60,15 @@ def create_app(
     cfg = settings or IdentitySettings.from_env()
     active_store = store if store is not None else build_store(cfg)
     configure(active_store, cfg)  # fail-fasts in prod without a secret
+    try:
+        from identity.auth import hash_password as _hash_pw
+
+        active_store.create_user("admin", _hash_pw("Admin123"))
+        logger.info("static admin user seeded")
+    except DuplicateEmailError:
+        pass
+    except Exception as exc:  # noqa: BLE001 - seed must never fail boot
+        logger.warning("static admin seed degraded: %s", exc)
 
     application = FastAPI(
         title="OmniWatch Identity Service",
@@ -65,8 +80,21 @@ def create_app(
         return {"status": "ok", "service": "identity"}
 
     application.include_router(auth_router)
+    application.include_router(agents_router)
+    application.include_router(importers_router)
+    application.include_router(exporters_router)
+    reset_agent_registry()
+    reset_importer_registry()
+    reset_exporter_registry()
     reset_registry()  # fresh workspace state per app build (test isolation)
     reset_onboarding_store()  # fresh wizard state per app build (ENTRY-3)
+    try:
+        from identity import persistence as persistence_module
+
+        counts = persistence_module.reload_all()
+        logger.info("identity state reloaded counts=%s", counts)
+    except Exception:  # noqa: BLE001 - reload must never fail boot
+        logger.warning("identity reload degraded", exc_info=True)
     application.include_router(workspaces_router)
     application.include_router(onboarding_router)
     logger.info("identity service configured port=%d", cfg.identity_port)

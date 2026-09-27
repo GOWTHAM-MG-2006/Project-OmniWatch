@@ -254,6 +254,10 @@ def _issue_pair(user_id: str, ws: Optional[str] = None) -> TokenResponse:
     status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest) -> RegisterResponse:
     """Register a new user (bcrypt hash -> users row)."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Registration disabled - static user only",
+    )
     email = body.email.strip()
     if not email:
         raise HTTPException(

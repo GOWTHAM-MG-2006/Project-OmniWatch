@@ -104,18 +104,32 @@ def _provision_clickhouse(record: WorkspaceRecord, naming: Naming) -> str:
     user = os.getenv("OMNIWATCH_CLICKHOUSE_USER", os.getenv("CLICKHOUSE_USER", "default"))
     password = os.getenv("OMNIWATCH_CLICKHOUSE_PASSWORD", os.getenv("CLICKHOUSE_PASSWORD", ""))
     db = naming.clickhouse_db(record.slug)
+    base_db = os.getenv("OMNIWATCH_CLICKHOUSE_DB",
+                        os.getenv("CLICKHOUSE_DB", "omniwatch"))
     client = clickhouse_connect.get_client(
         host=host, port=port, username=user, password=password,
         connect_timeout=2, send_receive_timeout=5,
     )
     try:
         client.command(f"CREATE DATABASE IF NOT EXISTS `{db}`")
-        import importlib
+        try:
+            import importlib
 
-        schema_migration = importlib.import_module(
-            "storage.clickhouse.migrations.001_initial_schema"
-        )
-        for statement in schema_migration.load_schema_statements():
+            schema_migration = importlib.import_module(
+                "storage.clickhouse.migrations.001_initial_schema"
+            )
+            statements = schema_migration.load_schema_statements()
+        except ImportError:
+            # Identity image ships without storage/: clone the base DB's
+            # tables instead (same result, no new dependency). The base DB
+            # is the live schema by definition.
+            statements = [
+                f"CREATE TABLE IF NOT EXISTS `{db}`.`{t}` "
+                f"AS `{base_db}`.`{t}`"
+                for (t,) in client.query(
+                    f"SHOW TABLES FROM `{base_db}`").result_rows
+            ]
+        for statement in statements:
             if "CREATE DATABASE" in statement:
                 continue  # database already created above
             # Backtick-quote: slugs allow hyphens (entry02-proof) which are
