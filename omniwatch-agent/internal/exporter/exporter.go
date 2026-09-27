@@ -217,6 +217,9 @@ func newResource() (*resource.Resource, error) {
 	); ns != "" {
 		attrs = append(attrs, semconv.K8SNamespaceName(ns))
 	}
+	if ws := os.Getenv("OMNIWATCH_WORKSPACE_SLUG"); ws != "" {
+		attrs = append(attrs, attribute.String("omniwatch.workspace", ws))
+	}
 	return resource.Merge(
 		resource.Default(),
 		resource.NewWithAttributes(semconv.SchemaURL, attrs...),
