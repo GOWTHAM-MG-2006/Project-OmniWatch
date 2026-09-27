@@ -282,6 +282,8 @@ def _bundle_zip(slug: str, endpoint_url: str, number: int, name: str) -> bytes:
         f"  exporter_number: {number}\n"
         f"  exporter_name: \"{name}\"\n"
         f"  entity_id: \"exporter-{number}-{slug}\"\n"
+        "agent:\n"
+        "  collection_interval: 30s\n"
         "telemetry_types:\n"
         "  - metrics\n"
         "  - logs\n"
