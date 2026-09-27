@@ -11,6 +11,8 @@ volumes:
   minio-data:
   ollama-data:
   flink-jobmanager-data:
+  cloudflared-logs:
+  tunnel-state:
 
 services:
 
@@ -166,22 +168,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-
-  otelcol:
-    image: otel/opentelemetry-collector-contrib:0.159.0
-    container_name: omniwatch-otelcol
-    networks:
-      - omniwatch-network
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "8888:8888"
-    volumes:
-      - ./ingestion/otelcol-config.yaml:/etc/otelcol-contrib/config.yaml
-    depends_on:
-      kafka:
-        condition: service_healthy
-    command: ["--config=/etc/otelcol-contrib/config.yaml"]
 
   # ---------------------------------------------------------------------------
   # Flink — Stream processing engine (Phase 2)
@@ -569,6 +555,44 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # Importer Service — exporter-importer split (per-workspace OTLP/HTTP ingest)
+  # ---------------------------------------------------------------------------
+  importer:
+    build:
+      context: .
+      dockerfile: importer/Dockerfile
+    container_name: omniwatch-importer
+    networks:
+      - omniwatch-network
+    ports:
+      - "${OMNIWATCH_IMPORTER_PORT:-4320}:4320"
+    environment:
+      OMNIWATCH_IMPORTER_PORT: ${OMNIWATCH_IMPORTER_PORT:-4320}
+      OMNIWATCH_IDENTITY_URL: http://identity:8012
+      # Shared with identity's IMPORTER_INTERNAL_SECRET (empty = dev default
+      # on both sides; set a real value in production on BOTH services).
+      IMPORTER_INTERNAL_SECRET: ${IMPORTER_INTERNAL_SECRET:-}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-omniwatch}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-omniwatch}
+    depends_on:
+      identity:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4320/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
   # Dashboard API — Phase 11 (backend for React dashboard frontend)
   # ---------------------------------------------------------------------------
   dashboard-api:
@@ -754,12 +778,18 @@ services:
       OMNIWATCH_JWT_TTL_S: ${OMNIWATCH_JWT_TTL_S:-3600}
       OMNIWATCH_JWT_REFRESH_TTL_S: ${OMNIWATCH_JWT_REFRESH_TTL_S:-86400}
       OMNIWATCH_IDENTITY_PORT: ${OMNIWATCH_IDENTITY_PORT:-8012}
-      OMNIWATCH_IDENTITY_STORE: ${OMNIWATCH_IDENTITY_STORE:-memory}
+      OMNIWATCH_IDENTITY_STORE: ${OMNIWATCH_IDENTITY_STORE:-clickhouse}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-omniwatch}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-omniwatch}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-omniwatch}
+      # Importer endpoint baked into issued workspace credentials. Default is
+      # the laptop tailnet IP so box exporters can reach it; override per env.
+      IMPORTER_PUBLIC_BASE_URL: ${IMPORTER_PUBLIC_BASE_URL:-http://100.107.175.64:4320}
+      # Internal importer auth (verify endpoint). Empty = dev default on both
+      # sides; set a strong value in production on BOTH identity+importer.
+      IMPORTER_INTERNAL_SECRET: ${IMPORTER_INTERNAL_SECRET:-}
     depends_on:
       clickhouse:
         condition: service_started
@@ -772,40 +802,76 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Beyla — eBPF auto-instrumentation sidecar (Phase 1)
+  # cloudflared — container tunnel method (public importer endpoint)
+  # Outbound-only quick tunnel: Cloudflare edge -> this container ->
+  # http://importer:4320. Dies cleanly with `compose down` (no stale host
+  # pids). The public URL is random per tunnel start; tunnel-registrar
+  # below captures it into the shared tunnel-state volume. Apply a fresh
+  # URL on EC2 boxes with update-endpoint.sh from the exporter bundle
+  # (tunnel-registrar also pushes it into identity live; named tunnel is
+  # future work, see drafts).
   # ---------------------------------------------------------------------------
-  beyla:
-    image: grafana/beyla:3.35.0
-    container_name: omniwatch-beyla
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: omniwatch-cloudflared
+    user: root # image runs non-root; root needed to create the logfile on the shared volume
     networks:
       - omniwatch-network
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2
+      - --logfile
+      - /var/log/cloudflared/tunnel.log
+      - --url
+      - http://importer:4320
     volumes:
-      - ./omniwatch-agent/configs/beyla-config.yaml:/etc/beyla/config.yaml
-    environment:
-      BEYLA_CONFIG_PATH: /etc/beyla/config.yaml
+      - cloudflared-logs:/var/log/cloudflared
     depends_on:
-      otelcol:
-        condition: service_started
-    cap_add:
-      - SYS_ADMIN
+      importer:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # OmniWatch Agent — Phase 1 (host/K8s telemetry collector, OTLP → otelcol)
+  # tunnel-registrar — watches the cloudflared log for the fresh
+  # https://*.trycloudflare.com URL, writes it to tunnel-url.txt in the
+  # shared tunnel-state volume, and POSTs it to identity's internal
+  # /importers/internal/endpoint (X-Internal-Secret guard) so the dashboard
+  # always shows the LIVE tunnel URL after every restart/rotation.
+  # Loops forever (covers mid-run rotations too); restart: unless-stopped
+  # re-runs it after a laptop reboot. Busybox wget does the POST. Read it:
+  #   docker run --rm -v project-omniwatch_tunnel-state:/tunnel-out alpine:3.20 cat /tunnel-out/tunnel-url.txt
   # ---------------------------------------------------------------------------
-  omniwatch-agent:
-    build: ./omniwatch-agent
-    container_name: omniwatch-agent
+  tunnel-registrar:
+    image: alpine:3.20
+    container_name: omniwatch-tunnel-registrar
     networks:
       - omniwatch-network
-    ports:
-      - "8080:8080"
-    volumes:
-      - /var/log/pods:/var/log/pods:ro
-      - /var/log/containers:/var/log/containers:ro
-      - /var/log/kubernetes/audit:/var/log/kubernetes/audit:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - OMNIWATCH_EXPORTER_OTLP_ENDPOINT=otelcol:4317
-      - AGENT_CONFIG=/etc/omniwatch/agent.yaml
+      IMPORTER_INTERNAL_SECRET: ${IMPORTER_INTERNAL_SECRET:-}
+    volumes:
+      - cloudflared-logs:/var/log/cloudflared:ro
+      - tunnel-state:/tunnel-out
     depends_on:
-      - otelcol
+      cloudflared:
+        condition: service_started
+      identity:
+        condition: service_healthy
+    restart: unless-stopped
+    command: >
+      sh -c 'mkdir -p /tunnel-out; LAST="";
+      push() {
+        for i in $$(seq 1 30); do
+          if wget -qO- --header "X-Internal-Secret: $${IMPORTER_INTERNAL_SECRET:-dev-only-internal-secret}" \
+            --post-data "{\"base_url\": \"$1\"}" --header "Content-Type: application/json" \
+            http://identity:8012/importers/internal/endpoint 2>/dev/null | grep -q endpoint_url;
+          then echo "pushed live endpoint: $1"; return 0; fi; sleep 2; done;
+        echo "WARN: identity push failed for $1"; return 1; };
+      while true; do
+        URL=$$(grep -Eo "https://[A-Za-z0-9.-]*\.trycloudflare\.com" /var/log/cloudflared/tunnel.log 2>/dev/null | tail -n 1);
+        if [ -n "$${URL}" ] && [ "$${URL}" != "$${LAST}" ]; then
+          echo "$${URL}" > /tunnel-out/tunnel-url.txt;
+          echo "tunnel URL: $${URL}";
+          if push "$${URL}"; then LAST="$${URL}"; fi;
+        fi; sleep 15; done'
