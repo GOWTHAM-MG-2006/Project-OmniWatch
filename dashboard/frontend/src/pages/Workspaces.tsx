@@ -34,6 +34,11 @@ export function Workspaces() {
   const [renameValue, setRenameValue] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [issuedCreds, setIssuedCreds] = useState<{
+    name: string
+    endpoint: string
+    token: string
+  } | null>(null)
 
   const activeWs = getSession()?.workspaceId ?? null
 
@@ -84,6 +89,18 @@ export function Workspaces() {
       const res = await createWorkspace({ name })
       setCreateName('')
       setNotice(`Workspace “${res.workspace.name}” created.`)
+      // The importer identity (endpoint + API token) is auto-generated with
+      // the workspace — show the token once, right here. It is never
+      // displayed again (stored hashed); rotation issues a new one.
+      if (res.importer_endpoint && res.importer_token) {
+        setIssuedCreds({
+          name: res.workspace.name,
+          endpoint: res.importer_endpoint,
+          token: res.importer_token,
+        })
+      } else {
+        setIssuedCreds(null)
+      }
       await refresh()
       navigate(`/workspaces/${res.workspace.workspace_id}/onboarding`)
     } catch (err) {
@@ -178,6 +195,24 @@ export function Workspaces() {
       {error && (
         <div role="alert" className="px-3 py-2 text-xs font-mono rounded bg-red-900/20 border border-red-900/40 text-red-400">
           {error}
+        </div>
+      )}
+      {issuedCreds && (
+        <div role="status" className="px-3 py-2 text-xs font-mono rounded bg-accent-cyan/10 border border-accent-cyan/30 text-accent-cyan flex flex-col gap-1">
+          <div>Importer auto-created for “{issuedCreds.name}” — copy the token now, it is never shown again.</div>
+          <div className="text-text-primary break-all">Endpoint: {issuedCreds.endpoint}</div>
+          <div className="break-all">Token: {issuedCreds.token}</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { void navigator.clipboard?.writeText(issuedCreds.token).catch(() => undefined) }}
+              className={btnPrimary}
+            >
+              Copy token
+            </button>
+            <button onClick={() => setIssuedCreds(null)} className={btnGhost}>
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
       {notice && (

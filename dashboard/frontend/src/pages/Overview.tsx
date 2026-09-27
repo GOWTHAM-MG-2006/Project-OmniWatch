@@ -9,11 +9,12 @@
 
 import { useFetch } from '../hooks/useFetch'
 import { useTimeRange } from '../hooks/useTimeRange'
-import { fetchSummary, fetchSeverityDistribution, fetchIncidentsTimeline, fetchTopology } from '../api/client'
+import { fetchSummary, fetchSeverityDistribution, fetchIncidentsTimeline, listWorkspaces } from '../api/client'
+import { getSession } from '../auth/session'
 import { KpiCard } from '../components/KpiCard'
 import { SeverityDonut } from '../components/SeverityDonut'
 import { IncidentsTimeline } from '../components/IncidentsTimeline'
-import { TopologyMini } from '../components/TopologyMini'
+import { LiveLogs } from '../components/LiveLogs'
 
 function SkeletonCard() {
   return <div className="col-span-6 card p-4 animate-pulse h-24 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }} />
@@ -28,7 +29,9 @@ export function Overview() {
   const { data: summary, loading: summaryLoading, error: summaryErr } = useFetch(() => fetchSummary({ timeRange, hours }), [timeRange])
   const { data: sevDist, loading: sevLoading } = useFetch(() => fetchSeverityDistribution({ timeRange, hours }), [timeRange])
   const { data: timeline, loading: tlLoading } = useFetch(() => fetchIncidentsTimeline({ timeRange, hours }), [timeRange])
-  const { data: topology, loading: topoLoading } = useFetch(fetchTopology)
+  const { data: workspaces } = useFetch(listWorkspaces, [])
+  const activeDb =
+    (workspaces ?? []).find((w) => w.workspace_id === getSession()?.workspaceId)?.clickhouse_database ?? ''
 
   const statusColor = summaryErr ? 'bg-[#ef4444]' : 'bg-[#22c55e]'
   const statusShadow = summaryErr
@@ -95,24 +98,8 @@ export function Overview() {
         )}
       </div>
 
-      {/* Topology Mini — full width */}
-      {topoLoading ? (
-        <SkeletonChart className="h-72" />
-      ) : (
-        <div className="card p-4 rounded-lg border border-[#2a2a2a]" style={{ background: 'linear-gradient(135deg, #1a1a1a, #141618)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[#a1a1aa] text-[10px] uppercase tracking-widest font-mono">Service Topology</div>
-            <div className="flex gap-3 text-[10px] text-[#a1a1aa]">
-              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#22c55e', boxShadow: '0 0 6px rgba(34,197,94,0.4)' }} />Healthy</span>
-              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#f59e0b', boxShadow: '0 0 6px rgba(245,158,11,0.4)' }} />Warning</span>
-              <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full" style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }} />Critical</span>
-            </div>
-          </div>
-          <div className="h-64">
-            <TopologyMini nodes={topology?.nodes ?? []} edges={topology?.edges ?? []} />
-          </div>
-        </div>
-      )}
+      {/* Live Logs — full width, replaces topology mini */}
+      <LiveLogs database={activeDb} workspaceId={getSession()?.workspaceId ?? ''} />
     </div>
   )
 }

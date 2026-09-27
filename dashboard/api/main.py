@@ -288,7 +288,10 @@ def _safe_ch_query(query: str, parameters: dict | None = None) -> list[dict]:
         query = _scoped_ch_query(query)  # ENTRY-5: per-workspace DB injection
         client = _get_ch_client()
         result = client.query(query, parameters=parameters or {})
-        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        columns = [
+            col[0] if isinstance(col, (list, tuple)) else str(col)
+            for col in result.column_names
+        ] if hasattr(result, "column_names") and result.column_names else []
         if not columns and hasattr(result, "result_columns"):
             return []
         rows: list[dict] = []
@@ -1837,9 +1840,17 @@ def create_app() -> FastAPI:
             return None
 
     async def _llm_generate(prompt: str) -> str | None:
-        """Generate text via configured LLM provider. Returns None on failure."""
+        """Generate text via configured LLM provider. Returns None on failure.
+
+        Bounded to 25s: cold qwen3:8b inference on CPU can take minutes
+        (model manager allows 240s), but report pages budget 60s total —
+        an unbounded wait here is what surfaced as
+        "timeout of 60000ms exceeded". Timeout degrades to the
+        deterministic ClickHouse/MinIO template (source without +ollama).
+        """
         try:
-            result = await _get_model_manager().generate(prompt)
+            result = await asyncio.wait_for(
+                _get_model_manager().generate(prompt), timeout=25.0)
             # generate() with stream=False always returns str; narrow for type checker
             text = result if isinstance(result, str) else ""
             return text.strip() if text else None
@@ -2325,7 +2336,10 @@ def create_app() -> FastAPI:
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout (>30s)"})
             return JSONResponse(status_code=422, content={"error": f"syntax or execution error: {msg}"})
-        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        columns = [
+            col[0] if isinstance(col, (list, tuple)) else str(col)
+            for col in result.column_names
+        ] if hasattr(result, "column_names") and result.column_names else []
         rows: list[dict] = []
         if hasattr(result, "result_rows") and result.result_rows:
             for row in result.result_rows:
@@ -2349,8 +2363,10 @@ def create_app() -> FastAPI:
                 username=x_clickhouse_user, password=x_clickhouse_password,
                 connect_timeout=5, send_receive_timeout=10,
             )
+            scope_db = get_current_scope().ch_database
             result = client.query(
-                "SELECT database, name, engine FROM system.tables ORDER BY database, name LIMIT 500"
+                "SELECT database, name, engine FROM system.tables WHERE database = %(db)s ORDER BY name LIMIT 500",
+                parameters={"db": scope_db},
             )
         except Exception as exc:
             msg = str(exc).split("\n")[0][:200]
@@ -2359,7 +2375,10 @@ def create_app() -> FastAPI:
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout"})
             return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
-        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        columns = [
+            col[0] if isinstance(col, (list, tuple)) else str(col)
+            for col in result.column_names
+        ] if hasattr(result, "column_names") and result.column_names else []
         rows: list[dict] = []
         if hasattr(result, "result_rows") and result.result_rows:
             for row in result.result_rows:
@@ -2386,10 +2405,12 @@ def create_app() -> FastAPI:
                 username=x_clickhouse_user, password=x_clickhouse_password,
                 connect_timeout=5, send_receive_timeout=10,
             )
+            scope_db = get_current_scope().ch_database
+            tbl = table_name.split(".", 1)[1] if "." in table_name else table_name
             result = client.query(
                 "SELECT name, type, default_kind, default_expression, comment "
-                "FROM system.columns WHERE table = %(tbl)s ORDER BY position",
-                parameters={"tbl": table_name},
+                "FROM system.columns WHERE database = %(db)s AND table = %(tbl)s ORDER BY position",
+                parameters={"db": scope_db, "tbl": tbl},
             )
         except Exception as exc:
             msg = str(exc).split("\n")[0][:200]
@@ -2398,7 +2419,10 @@ def create_app() -> FastAPI:
             if "timeout" in msg.lower():
                 return JSONResponse(status_code=504, content={"error": "query timeout"})
             return JSONResponse(status_code=502, content={"error": "ClickHouse is not reachable"})
-        columns = [col[0] for col in result.column_names] if hasattr(result, "column_names") and result.column_names else []
+        columns = [
+            col[0] if isinstance(col, (list, tuple)) else str(col)
+            for col in result.column_names
+        ] if hasattr(result, "column_names") and result.column_names else []
         rows: list[dict] = []
         if hasattr(result, "result_rows") and result.result_rows:
             for row in result.result_rows:

@@ -168,8 +168,8 @@ export function DataExplorer() {
                       {result.rows.map((row, i) => (
                         <tr key={i} className="hover:bg-[#141618]">
                           {row.map((cell, j) => (
-                            <td key={j} className="px-3 py-1.5 font-mono truncate max-w-[200px]" title={String(cell ?? '')}>
-                              {cell === null ? <span className="text-text-muted italic">NULL</span> : String(cell)}
+                            <td key={j} className="px-3 py-1.5 font-mono truncate max-w-[200px]" title={typeof cell === 'object' && cell !== null ? JSON.stringify(cell) : String(cell ?? '')}>
+                              {cell === null ? <span className="text-text-muted italic">NULL</span> : typeof cell === 'object' ? JSON.stringify(cell) : String(cell)}
                             </td>
                           ))}
                         </tr>

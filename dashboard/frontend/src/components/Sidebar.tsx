@@ -9,6 +9,7 @@ const navItems = [
   { path: '/security', label: 'Security', icon: '▣' },
   { path: '/data', label: 'Data', icon: '▤' },
   { path: '/graph', label: 'Graph', icon: '⬡' },
+  { path: '/agents', label: 'Omni-Agent', icon: '⬣' },
   { path: '/storage', label: 'Storage', icon: '⬢' },
   { path: '/settings/model', label: 'Model Settings', icon: '⚙' },
 ]

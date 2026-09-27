@@ -30,6 +30,25 @@ const identityApi = axios.create({
   timeout: 15_000,
 })
 
+// Importer service (importer/main.py, port 4320): workspace ingest +
+// activity. Same relative-prefix proxying as identityApi (nginx
+// '/importer' -> importer:4320 in compose). Every route here needs the
+// caller's Bearer token (ingest uses exporter tokens instead, but the
+// browser only calls activity + health).
+const importerApi = axios.create({
+  baseURL: '/importer',
+  timeout: 15_000,
+})
+
+importerApi.interceptors.request.use((config) => {
+  const session = getSession()
+  if (session) {
+    config.headers = config.headers ?? {}
+    config.headers['Authorization'] = `Bearer ${session.accessToken}`
+  }
+  return config
+})
+
 // Attach `Authorization: Bearer` (session memory) + the active-workspace
 // header on every dashboard call. The backend (todo 5) enforces the `ws`
 // claim; the header is the routing hint so scoped queries resolve without
@@ -55,6 +74,9 @@ identityApi.interceptors.request.use((config) => {
   const needsAuth =
     url.startsWith('/auth/me') ||
     url.startsWith('/workspaces') ||
+    url.startsWith('/agents') ||
+    url.startsWith('/importers') ||
+    url.startsWith('/exporters') ||
     url.startsWith('/auth/logout')
   if (needsAuth) {
     const session = getSession()
@@ -94,13 +116,19 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      clearDbAuthFlagForUrl(error?.config?.url)
+      const url = (error?.config?.url ?? '') as string
+      clearDbAuthFlagForUrl(url)
       // A 401 on a Bearer-authenticated dashboard call means the JWT is
       // expired/tampered/mismatched: drop the session and re-lock every
-      // session-gated page (same discipline as the DB AuthGates — a stale
-      // `ws` claim must never leave data visible).
+      // session-gated page. But a 401 on a DB-console route (clickhouse/
+      // neo4j/minio) is a DB credential failure, not a JWT failure — must
+      // not clear the session.
+      const isDbRoute =
+        url.includes('/clickhouse/') ||
+        url.includes('/neo4j/') ||
+        url.includes('/minio/')
       const sentAuth = (error?.config?.headers as Record<string, unknown> | undefined)?.['Authorization']
-      if (sentAuth) {
+      if (sentAuth && !isDbRoute) {
         clearSession()
         notifySessionInvalid()
       }
@@ -310,7 +338,24 @@ export async function fetchIncidents(params?: {
     p.hours = map[p.timeRange as string] ?? 24
   }
   const { data } = await api.get<IncidentsResponse>('/incidents', { params: p })
-  return data
+  const sevMap: Record<string, string> = { 'HIGH': 'P1', 'MEDIUM': 'P2', 'LOW': 'P4' }
+  const raw = (data?.incidents ?? data?.items ?? []) as any[]
+  const incidents = raw.map((t: any, idx: number) => ({
+    incident_id: t.incident_id ?? `${t.r ?? 'inc'}-${t.c ?? idx}`,
+    created_at: t.created_at ?? t.c ?? '',
+    severity: sevMap[t.severity ?? t.s] ?? t.severity ?? t.s ?? 'P4',
+    business_impact_score: t.business_impact_score ?? t.b ?? 0,
+    root_cause_entity: t.root_cause_entity ?? t.r ?? '',
+    entity_type: t.entity_type ?? t.e ?? '',
+    fault_path: t.fault_path ?? t.f ?? '',
+    impacted_services: t.impacted_services ?? t.i ?? '',
+    deduplicated_count: t.deduplicated_count ?? t.d ?? 0,
+    sla_breach_risk: t.sla_breach_risk ?? ({ P1: 'HIGH', P2: 'MEDIUM' } as Record<string, string>)[sevMap[t.severity ?? t.s] ?? t.severity ?? t.s ?? 'P4'] ?? 'LOW',
+    assigned_to: t.assigned_to ?? t.a ?? '',
+    status: t.status ?? 'OPEN',
+    related_anomalies: t.related_anomalies ?? '',
+  }))
+  return { incidents, count: data?.count ?? data?.total_count ?? incidents.length, timestamp: data.timestamp }
 }
 
 export async function fetchTopology(): Promise<TopologyResponse> {
@@ -489,7 +534,16 @@ function chHeaders(): Record<string, string> {
 
 export async function clickhouseQuery(query: string, limit = 100): Promise<ClickHouseQueryResult> {
   const { data } = await api.post<ClickHouseQueryResult>('/clickhouse/query', { query, limit }, { headers: chHeaders(), timeout: 30_000 })
-  return data
+  const columns: string[] = Array.isArray(data?.columns) ? data.columns : []
+  const rawRows: unknown[] = Array.isArray(data?.rows) ? data.rows : []
+  const rows: unknown[][] = rawRows.map((row) => {
+    if (Array.isArray(row)) return row
+    if (row !== null && typeof row === 'object') {
+      return columns.map((col) => (row as Record<string, unknown>)[col] ?? null)
+    }
+    return [row]
+  })
+  return { ...data, columns, rows, row_count: rows.length }
 }
 
 export async function clickhouseTables(): Promise<{ tables: ClickHouseTableInfo[]; count: number }> {
@@ -676,6 +730,8 @@ export interface WorkspaceCreateResult {
     otlp_note: string
     agent_config: Record<string, string>
   }
+  importer_endpoint?: string | null
+  importer_token?: string | null
 }
 
 export async function listWorkspaces(): Promise<Workspace[]> {
@@ -719,6 +775,132 @@ export async function switchWorkspace(id: string): Promise<{
 }> {
   const { data } = await identityApi.post(`/workspaces/${encodeURIComponent(id)}/switch`)
   return data
+}
+
+export interface AgentBinding {
+  binding_id: string
+  workspace_id: string
+  workspace_slug: string
+  agent_endpoint: string
+  status: string
+  created_at: string
+}
+
+export async function pairAgent(input: {
+  endpoint: string
+  token: string
+  workspace_id: string
+}): Promise<AgentBinding> {
+  const { data } = await identityApi.post<AgentBinding>('/agents/pair', input)
+  return data
+}
+
+export async function listAgents(): Promise<AgentBinding[]> {
+  const { data } = await identityApi.get<AgentBinding[]>('/agents')
+  return data
+}
+
+export async function unbindAgent(bindingId: string): Promise<{ binding_id: string; status: string }> {
+  const { data } = await identityApi.delete(`/agents/${encodeURIComponent(bindingId)}`)
+  return data
+}
+
+export interface ImporterInfo {
+  workspace_id: string
+  workspace_slug: string
+  endpoint_url: string
+  created_at: string
+  /** Raw token — present only when first revealed (auto-provision/rotation). */
+  api_token?: string | null
+}
+
+export interface ImporterIssued extends ImporterInfo {
+  api_token: string
+}
+
+export async function getImporter(workspaceId: string): Promise<ImporterInfo> {
+  const { data } = await identityApi.get<ImporterInfo>(
+    `/importers/by-workspace/${encodeURIComponent(workspaceId)}`)
+  return data
+}
+
+export async function rotateImporter(workspaceId: string): Promise<ImporterIssued> {
+  const { data } = await identityApi.post<ImporterIssued>(
+    `/importers/${encodeURIComponent(workspaceId)}/rotate`)
+  return data
+}
+
+export interface ActivityPoint {
+  entity_id: string
+  telemetry_type: string
+  last_seen: string
+}
+
+export interface ActivityResponse {
+  workspace_slug: string
+  activity: ActivityPoint[]
+}
+
+export async function getImporterActivity(workspaceId: string): Promise<ActivityResponse> {
+  const { data } = await importerApi.get<ActivityResponse>(
+    `/activity/by-workspace/${encodeURIComponent(workspaceId)}`)
+  return data
+}
+
+export interface RecentLog {
+  timestamp: string
+  level: string
+  entity: string
+  message: string
+}
+
+export async function getRecentLogs(workspaceId: string): Promise<RecentLog[]> {
+  const { data } = await importerApi.get<{ workspace_slug: string; logs: RecentLog[] }>(
+    `/activity/recent-logs/by-workspace/${encodeURIComponent(workspaceId)}`)
+  return data.logs ?? []
+}
+
+export interface ExporterInfo {
+  workspace_id: string
+  number: number
+  name: string
+  endpoint_url: string
+  created_at: string
+}
+
+export async function registerExporter(input: {
+  workspace_id: string
+  name: string
+}): Promise<ExporterInfo> {
+  const { data } = await identityApi.post<ExporterInfo>('/exporters', input)
+  return data
+}
+
+export async function listExporters(workspaceId: string): Promise<ExporterInfo[]> {
+  const { data } = await identityApi.get<ExporterInfo[]>(
+    `/exporters/by-workspace/${encodeURIComponent(workspaceId)}`)
+  return data
+}
+
+export async function deleteExporter(workspaceId: string, number: number): Promise<{
+  workspace_id: string
+  number: number
+  deleted: boolean
+}> {
+  const { data } = await identityApi.delete(
+    `/exporters/${encodeURIComponent(workspaceId)}/${number}`)
+  return data
+}
+
+export async function downloadExporterBundle(workspaceId: string, number: number): Promise<Blob> {
+  // The bundle embeds the ~48MB Linux exporter binary: allow 5 minutes.
+  // (Measured ~50s through the :3000 proxy; the shared 15s default would
+  // abort it every time.)
+  const { data } = await identityApi.get(
+    `/exporters/bundle/${encodeURIComponent(workspaceId)}`,
+    { params: { number }, responseType: 'blob', timeout: 300_000 },
+  )
+  return data as Blob
 }
 
 // Wizard enums mirror identity/models.py exactly (closed vocabularies;

@@ -16,6 +16,7 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Workspaces } from './pages/Workspaces'
 import { WorkspaceOnboarding } from './pages/WorkspaceOnboarding'
+import { OmniAgent } from './pages/OmniAgent'
 
 function DashboardShell() {
   return (
@@ -46,6 +47,7 @@ function DashboardShell() {
             <Route path="/storage" element={<RequireWorkspace><MinioBrowser /></RequireWorkspace>} />
             <Route path="/data" element={<RequireWorkspace><DataExplorer /></RequireWorkspace>} />
             <Route path="/graph" element={<RequireWorkspace><GraphExplorer /></RequireWorkspace>} />
+            <Route path="/agents" element={<RequireWorkspace><OmniAgent /></RequireWorkspace>} />
             <Route path="/settings/model" element={<RequireWorkspace><ModelSettings /></RequireWorkspace>} />
           </Routes>
         </main>
