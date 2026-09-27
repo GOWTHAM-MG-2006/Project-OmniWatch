@@ -6,6 +6,17 @@
 #          PYTHONPATH=/app, curl healthcheck)
 # ---------------------------------------------------------------------------
 
+# == Stage 0: agent-builder — Linux exporter binary for bundles ============
+# The /exporters/bundle zip ships this binary so iron/VM provisioning is one
+# download (config + binary + install script). Stripped to keep it small.
+FROM golang:1.23-alpine AS agent-builder
+
+WORKDIR /build
+COPY omniwatch-agent/go.mod omniwatch-agent/go.sum ./
+RUN go mod download
+COPY omniwatch-agent/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /agent-bin/omniwatch-agent ./cmd/agent
+
 # == Stage 1: builder — install Python dependencies ==========================
 FROM python:3.11-slim AS builder
 
@@ -30,6 +41,10 @@ WORKDIR /app
 
 # -- Copy service code (self-contained: no storage/ copy needed) --
 COPY identity/ ./identity/
+
+# -- Exporter binary shipped inside workspace bundles --
+COPY --from=agent-builder /agent-bin/omniwatch-agent /opt/omniwatch-agent/omniwatch-agent
+ENV OMNIWATCH_AGENT_BIN=/opt/omniwatch-agent/omniwatch-agent
 
 # -- Ensure identity package is on Python path --
 ENV PYTHONPATH=/app
