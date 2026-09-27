@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -125,14 +126,28 @@ type Client struct {
 }
 
 // New builds a Client with production-default guards.
+// Keep-alives are disabled on purpose: the importer sits behind a
+// Cloudflare edge that closes idle connections quickly, and Go's Transport
+// only auto-retries stale-conn resets for idempotent requests — our POSTs
+// would eat the RST instead. One emission per minute makes the extra
+// handshake per request negligible. This fixes the observed alternating
+// "connection reset by peer" / success flap at 60s cadence.
 func New(cfg Config, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	retry := resilience.DefaultRetryPolicy()
+	transport := &http.Transport{
+		DisableKeepAlives:   true,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 0,
+		}).DialContext,
+	}
 	return &Client{
 		cfg:     cfg,
-		http:    &http.Client{Timeout: cfg.Timeout},
+		http:    &http.Client{Timeout: cfg.Timeout, Transport: transport},
 		logger:  logger,
 		breaker: resilience.NewCircuitBreaker(resilience.BreakerSettings{Name: "importer-direct"}),
 		retry:   &retry,
