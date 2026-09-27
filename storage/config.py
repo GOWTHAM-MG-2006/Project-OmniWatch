@@ -452,6 +452,14 @@ class StorageConfig:
                 entrypoints; local-dev and tests must NOT call it so today's
                 defaults keep booting unchanged.
         """
+        import os as _os
+
+        if _os.getenv("OMNIWATCH_ENV", "dev") != "production":
+            if self.clickhouse_password == "":
+                _log.warning(
+                    "OMNIWATCH_CLICKHOUSE_PASSWORD is empty; connecting without a "
+                    "ClickHouse password (ok for local dev only)")
+            return
         missing: list[str] = []
         if self.minio_access_key in ("", "minioadmin"):
             missing.append("OMNIWATCH_MINIO_ACCESS_KEY")
@@ -459,15 +467,13 @@ class StorageConfig:
             missing.append("OMNIWATCH_MINIO_SECRET_KEY")
         if self.neo4j_password in ("", "omniwatch"):
             missing.append("OMNIWATCH_NEO4J_PASSWORD")
+        if self.clickhouse_password in ("", None):
+            missing.append("OMNIWATCH_CLICKHOUSE_PASSWORD")
         if missing:
             raise ValueError(
                 "refusing to connect with dev-default secrets: "
                 + ", ".join(missing)
                 + " — set non-default values via environment")
-        if self.clickhouse_password == "":
-            _log.warning(
-                "OMNIWATCH_CLICKHOUSE_PASSWORD is empty; connecting without a "
-                "ClickHouse password (ok for local dev only)")
 
     def env(self) -> Dict[str, str]:
         """Return the effective env-var mapping for this config instance.

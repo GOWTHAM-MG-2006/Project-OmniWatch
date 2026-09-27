@@ -48,7 +48,8 @@ STATEMENTS: List[str] = [
   expected_volume String,
   retention_days UInt32,
   created_at DateTime,
-  deleted UInt8
+  deleted UInt8,
+  mirrored_at DateTime DEFAULT created_at
 ) ENGINE = MergeTree() ORDER BY workspace_id""",
 ]
 

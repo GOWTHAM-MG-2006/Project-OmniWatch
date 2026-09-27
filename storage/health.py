@@ -41,6 +41,7 @@ def check_storage_health(config: Optional[StorageConfig] = None) -> Dict[str, An
     outage cannot crash the whole check.
     """
     cfg = config or StorageConfig.from_env()
+    cfg.require_production_secrets()
     clickhouse = ClickHouseClient(cfg)
     neo4j = Neo4jClient(cfg)
     minio = MinioClient(cfg)
